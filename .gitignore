@@ -5,3 +5,39 @@ cmake-build-*/
 *.db
 .vscode/
 .idea/
+# Build outputs
+build/
+cmake-build-*/
+out/
+
+# Compiled files
+*.exe
+*.dll
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+
+# Qt Creator local configuration
+.qtcreator/
+CMakeUserPresets.json
+*.user
+*.user.*
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local databases and sensitive configuration
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
