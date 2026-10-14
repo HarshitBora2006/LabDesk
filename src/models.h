@@ -69,7 +69,18 @@ struct StoredProcess {
     int priority = 0;
 };
 
+// A "laboratory" is a distinct computer.location value. There is no separate
+// laboratory table, so labs are derived from the computer inventory.
+struct LabSummary {
+    QString location;
+    int total = 0;
+    int available = 0;
+    int occupied = 0;
+    int maintenance = 0;
+};
+
 struct DashboardStats {
+    int laboratories = 0;
     int totalComputers = 0;
     int available = 0;
     int occupied = 0;

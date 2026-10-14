@@ -18,14 +18,16 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("LabDesk"));
     QApplication::setOrganizationName(QStringLiteral("LabDesk"));
-    QApplication::setApplicationVersion(QStringLiteral("0.5.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.6.0"));
     QApplication::setStyle(QStringLiteral("Fusion"));
 
     QFont font = QApplication::font();
     if (font.pointSizeF() < 10.0)
         font.setPointSizeF(10.0);
     QApplication::setFont(font);
-    app.setStyleSheet(labdesk::ui::theme::styleSheet());
+    // Complete light palette + stylesheet. Must happen before any widget is
+    // created, otherwise unstyled surfaces pick up the (possibly dark) system palette.
+    labdesk::ui::theme::applyApplicationTheme(app);
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Smart computer lab management and CPU scheduling"));

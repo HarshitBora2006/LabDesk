@@ -21,6 +21,8 @@ class ComputersPage : public Page {
 public:
     ComputersPage(Services& services, QWidget* parent = nullptr);
     void refresh() override;
+    // Shows all computers whose ID, name or location matches `location`.
+    void showLocation(const QString& location);
 
 private:
     void onSelectionChanged();
@@ -29,9 +31,11 @@ private:
     void onDelete();
     void clearForm();
     void updateButtons();
+    void applySearch();
 
     Services& m_services;
     QComboBox* m_filter = nullptr;
+    QLineEdit* m_search = nullptr;
     QTableWidget* m_table = nullptr;
     QLabel* m_empty = nullptr;
     QLabel* m_formTitle = nullptr;

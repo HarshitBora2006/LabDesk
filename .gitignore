@@ -1,43 +1,40 @@
+# Build output (CMake / Qt Creator / Visual Studio)
 build/
 build-*/
+out/
 cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.dir/
+.qtcreator/
+CMakeLists.txt.user
+CMakeLists.txt.user.*
 *.user
-*.db
+CMakeUserPresets.json
+.vs/
 .vscode/
 .idea/
-# Build outputs
-build/
-cmake-build-*/
-out/
 
-# Compiled files
-*.exe
-*.dll
+# Compiled artefacts
 *.o
 *.obj
 *.a
 *.lib
+*.dll
+*.exe
 *.pdb
+*.ilk
+*.exp
 
-# Qt Creator local configuration
-.qtcreator/
-CMakeUserPresets.json
-*.user
-*.user.*
+# Local SQLite databases and journals (never commit real data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
 
-# IDE and OS files
-.vscode/
-.idea/
+# Python / OS clutter
+__pycache__/
+*.pyc
 .DS_Store
 Thumbs.db
-
-# Local databases and sensitive configuration
-.env
-.env.*
-!.env.example
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-*.log

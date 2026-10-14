@@ -29,6 +29,10 @@ public:
 
     DashboardStats dashboardStats(QString* error = nullptr) const;
 
+    // One row per laboratory (distinct location) with status counts.
+    // Returns false and fills `error` if the query fails.
+    bool labSummaries(std::vector<LabSummary>& out, QString* error = nullptr) const;
+
     // Cross-table invariant checks; each string describes one violation.
     // An empty list means computer statuses agree with sessions and maintenance.
     QStringList consistencyProblems(QString* error = nullptr) const;

@@ -58,7 +58,7 @@ MaintenancePage::MaintenancePage(Services& services, QWidget* parent) : Page(par
     setupTable(m_table, {QStringLiteral("Issue"), QStringLiteral("Computer"), QStringLiteral("Description"),
                          QStringLiteral("Reported"), QStringLiteral("Resolved"), QStringLiteral("Status")});
     history->addWidget(m_table, 1);
-    m_empty = makeLabel(QStringLiteral("No maintenance issues recorded."), QStringLiteral("emptyState"));
+    m_empty = makeStateMessage();
     history->addWidget(m_empty);
     auto* actions = new QHBoxLayout();
     m_edit = makeButton(QStringLiteral("Edit description"));
@@ -83,7 +83,10 @@ void MaintenancePage::reloadComputerChoices()
     const QString previous = m_computer->currentData().toString();
     m_computer->blockSignals(true);
     m_computer->clear();
-    const auto computers = m_services.computers.listComputers();
+    QString error;
+    const auto computers = m_services.computers.listComputers(QString(), &error);
+    if (!error.isEmpty())
+        m_banner->showError(QStringLiteral("The computer list could not be loaded: ") + error);
     auto* model = qobject_cast<QStandardItemModel*>(m_computer->model());
     for (const Computer& c : computers) {
         QString label = QStringLiteral("%1 (%2)").arg(c.computerId, c.status.toLower());
@@ -98,6 +101,8 @@ void MaintenancePage::reloadComputerChoices()
     const int index = m_computer->findData(previous);
     if (index >= 0)
         m_computer->setCurrentIndex(index);
+    if (computers.empty() && error.isEmpty())
+        m_computer->addItem(QStringLiteral("No computers registered yet"), QString());
     m_computer->blockSignals(false);
 }
 
@@ -107,8 +112,6 @@ void MaintenancePage::refresh()
 
     QString error;
     const auto records = m_services.maintenance.listRecords(m_openOnly->isChecked(), &error);
-    if (!error.isEmpty())
-        m_banner->showError(QStringLiteral("Could not load maintenance records: ") + error);
 
     const qlonglong selected = selectedRowData(m_table).toLongLong();
     m_table->blockSignals(true);
@@ -129,8 +132,19 @@ void MaintenancePage::refresh()
     if (reselect >= 0)
         m_table->selectRow(reselect);
     m_table->blockSignals(false);
-    m_empty->setVisible(records.empty());
-    m_table->setVisible(!records.empty());
+    if (!error.isEmpty()) {
+        m_table->hide();
+        showErrorState(m_empty, error);
+    } else if (records.empty()) {
+        m_table->hide();
+        showEmptyState(m_empty, m_openOnly->isChecked()
+                                    ? QStringLiteral("No active maintenance issues. Every computer is in service.")
+                                    : QStringLiteral("No maintenance issues have been recorded yet. Use \"Report "
+                                                     "issue\" above when a computer needs repair."));
+    } else {
+        m_table->show();
+        m_empty->hide();
+    }
     updateButtons();
 }
 
@@ -149,6 +163,10 @@ void MaintenancePage::updateButtons()
 void MaintenancePage::onReport()
 {
     const QString computerId = m_computer->currentData().toString();
+    if (computerId.isEmpty()) {
+        m_banner->showWarning(QStringLiteral("Choose a computer before reporting an issue."));
+        return;
+    }
     const OpResult r = m_services.maintenance.reportIssue(computerId, m_description->text());
     if (!r.ok) {
         m_banner->showError(r.message);

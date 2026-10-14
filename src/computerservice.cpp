@@ -185,6 +185,7 @@ DashboardStats ComputerService::dashboardStats(QString* error) const
     QSqlQuery q(m_db.connection());
     const bool ok = q.exec(QStringLiteral(
         "SELECT "
+        " (SELECT COUNT(DISTINCT location) FROM computer),"
         " (SELECT COUNT(*) FROM computer),"
         " (SELECT COUNT(*) FROM computer WHERE status = 'AVAILABLE'),"
         " (SELECT COUNT(*) FROM computer WHERE status = 'OCCUPIED'),"
@@ -197,14 +198,42 @@ DashboardStats ComputerService::dashboardStats(QString* error) const
             *error = q.lastError().text();
         return s;
     }
-    s.totalComputers = q.value(0).toInt();
-    s.available = q.value(1).toInt();
-    s.occupied = q.value(2).toInt();
-    s.maintenance = q.value(3).toInt();
-    s.activeSessions = q.value(4).toInt();
-    s.students = q.value(5).toInt();
-    s.openMaintenance = q.value(6).toInt();
+    s.laboratories = q.value(0).toInt();
+    s.totalComputers = q.value(1).toInt();
+    s.available = q.value(2).toInt();
+    s.occupied = q.value(3).toInt();
+    s.maintenance = q.value(4).toInt();
+    s.activeSessions = q.value(5).toInt();
+    s.students = q.value(6).toInt();
+    s.openMaintenance = q.value(7).toInt();
     return s;
+}
+
+bool ComputerService::labSummaries(std::vector<LabSummary>& out, QString* error) const
+{
+    out.clear();
+    QSqlQuery q(m_db.connection());
+    const bool ok = q.exec(QStringLiteral(
+        "SELECT location, COUNT(*),"
+        "       SUM(CASE WHEN status = 'AVAILABLE'   THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN status = 'OCCUPIED'    THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) "
+        "FROM computer GROUP BY location ORDER BY location"));
+    if (!ok) {
+        if (error)
+            *error = q.lastError().text();
+        return false;
+    }
+    while (q.next()) {
+        LabSummary lab;
+        lab.location = q.value(0).toString();
+        lab.total = q.value(1).toInt();
+        lab.available = q.value(2).toInt();
+        lab.occupied = q.value(3).toInt();
+        lab.maintenance = q.value(4).toInt();
+        out.push_back(lab);
+    }
+    return true;
 }
 
 QStringList ComputerService::consistencyProblems(QString* error) const

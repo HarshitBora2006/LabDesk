@@ -38,13 +38,16 @@ ComputersPage::ComputersPage(Services& services, QWidget* parent) : Page(parent)
     m_filter->addItem(QStringLiteral("Occupied"), ComputerStatus::Occupied);
     m_filter->addItem(QStringLiteral("Under maintenance"), ComputerStatus::Maintenance);
     filterRow->addWidget(m_filter);
-    filterRow->addStretch();
+    m_search = new QLineEdit();
+    m_search->setPlaceholderText(QStringLiteral("Search by ID, name or laboratory"));
+    m_search->setClearButtonEnabled(true);
+    filterRow->addWidget(m_search, 1);
     list->addLayout(filterRow);
     m_table = new QTableWidget();
     setupTable(m_table, {QStringLiteral("Computer ID"), QStringLiteral("Name"), QStringLiteral("Location"),
                          QStringLiteral("Status"), QStringLiteral("In use by")});
     list->addWidget(m_table, 1);
-    m_empty = makeLabel(QStringLiteral("No computers match this filter."), QStringLiteral("emptyState"));
+    m_empty = makeStateMessage();
     list->addWidget(m_empty);
     body->addWidget(listCard, 3);
 
@@ -90,6 +93,7 @@ ComputersPage::ComputersPage(Services& services, QWidget* parent) : Page(parent)
     root->addLayout(body, 1);
 
     connect(m_filter, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { refresh(); });
+    connect(m_search, &QLineEdit::textChanged, this, &ComputersPage::applySearch);
     connect(m_table, &QTableWidget::itemSelectionChanged, this, &ComputersPage::onSelectionChanged);
     connect(m_add, &QPushButton::clicked, this, &ComputersPage::onAdd);
     connect(m_save, &QPushButton::clicked, this, &ComputersPage::onSave);
@@ -102,8 +106,6 @@ void ComputersPage::refresh()
 {
     QString error;
     const auto computers = m_services.computers.listComputers(m_filter->currentData().toString(), &error);
-    if (!error.isEmpty())
-        m_banner->showError(QStringLiteral("Could not load computers: ") + error);
 
     QHash<QString, QString> usedBy;
     for (const SessionRecord& r : m_services.sessions.listSessions(true, 1000))
@@ -135,8 +137,47 @@ void ComputersPage::refresh()
         else
             clearForm();
     }
-    m_empty->setVisible(computers.empty());
-    m_table->setVisible(!computers.empty());
+    applySearch();
+    if (!error.isEmpty()) {
+        m_table->hide();
+        showErrorState(m_empty, error);
+    }
+}
+
+void ComputersPage::showLocation(const QString& location)
+{
+    m_filter->setCurrentIndex(0);  // all statuses (triggers refresh)
+    m_search->setText(location);   // triggers applySearch
+    refresh();
+}
+
+void ComputersPage::applySearch()
+{
+    const QString needle = m_search->text().trimmed();
+    int visible = 0;
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        bool match = needle.isEmpty();
+        for (int col = 0; col < 3 && !match; ++col) {
+            const QTableWidgetItem* item = m_table->item(row, col);
+            match = item && item->text().contains(needle, Qt::CaseInsensitive);
+        }
+        m_table->setRowHidden(row, !match);
+        if (match)
+            ++visible;
+    }
+    if (m_table->rowCount() == 0) {
+        m_table->hide();
+        showEmptyState(m_empty, m_filter->currentIndex() == 0
+                                    ? QStringLiteral("No computers registered yet. Use the form to add the first one.")
+                                    : QStringLiteral("No computers have the status \"%1\".")
+                                          .arg(m_filter->currentText()));
+    } else if (visible == 0) {
+        m_table->hide();
+        showEmptyState(m_empty, QStringLiteral("No computers match \"%1\".").arg(needle));
+    } else {
+        m_table->show();
+        m_empty->hide();
+    }
 }
 
 void ComputersPage::onSelectionChanged()

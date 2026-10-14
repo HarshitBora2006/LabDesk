@@ -6,6 +6,7 @@
 #include "services.h"
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QVariant>
@@ -228,6 +229,49 @@ int main(int argc, char* argv[])
     workload[1].burst = 2;
     check(s.processes.saveWorkload(active->sessionId, workload).ok, "workload linked to session saved");
     check(s.processes.loadWorkload(active->sessionId).size() == 2, "workload loads back");
+
+    std::cout << "Dashboard and laboratory summaries (milestone 1.1)\n";
+    s.computers.addComputer({QStringLiteral("PC-B1"), QStringLiteral("Dell B1"), QStringLiteral("Lab B"), {}});
+    {
+        const DashboardStats d = s.computers.dashboardStats();
+        check(d.laboratories == 2, "dashboard counts 2 laboratories (distinct locations)");
+        std::vector<LabSummary> labs;
+        QString labError;
+        check(s.computers.labSummaries(labs, &labError) && labError.isEmpty(), "lab summary query succeeds");
+        check(labs.size() == 2 && labs[0].location == "Lab A" && labs[1].location == "Lab B",
+              "one summary per laboratory, ordered by name");
+        int total = 0;
+        for (const LabSummary& lab : labs)
+            total += lab.total;
+        check(total == d.totalComputers, "laboratory totals add up to the total computer count");
+        check(labs[0].occupied == 1 && labs[0].available == 1, "Lab A: PC-02 occupied, PC-01 available");
+    }
+
+    std::cout << "Session lookup and session-linked workloads (milestone 1.1)\n";
+    {
+        const auto found = s.sessions.findSession(active->sessionId);
+        check(found.has_value() && found->studentId == "S200" && found->computerId == "PC-02"
+                  && found->location == "Lab A",
+              "findSession returns the joined session details");
+        const auto ended = s.sessions.findSession(firstSession);
+        check(ended.has_value() && ended->status == SessionStatus::Ended && !ended->endTime.isEmpty(),
+              "findSession also returns ended sessions");
+        check(!s.sessions.findSession(987654).has_value(), "findSession: unknown id returns nothing");
+
+        std::vector<StoredProcess> demo(1);
+        demo[0].label = QStringLiteral("D1");
+        demo[0].burst = 3;
+        check(s.processes.saveWorkload(std::nullopt, demo).ok, "unlinked demo workload saved");
+        const auto linked = s.processes.loadWorkload(active->sessionId);
+        check(linked.size() == 2 && linked[0].label == "P1" && linked[1].label == "P2",
+              "session workload keeps its own process IDs, in saved order");
+        check(linked[1].arrival == 1 && linked[1].burst == 2, "session workload keeps stored arrival/burst values");
+        check(s.processes.loadWorkload(firstSession).empty(), "a session without a saved workload loads nothing");
+        QHash<qint64, int> sizes;
+        check(s.processes.workloadSizes(sizes) && sizes.value(active->sessionId) == 2
+                  && sizes.value(ProcessService::kUnlinkedKey) == 1,
+              "workload sizes per session and for the demo workload");
+    }
 
     std::cout << "TEST 13 - persistence after restart\n";
     const int sessionsBefore = scalar(*db, QStringLiteral("SELECT COUNT(*) FROM session"));

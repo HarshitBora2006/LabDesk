@@ -5,6 +5,14 @@ It is embedded in the application and applied on every start: all statements
 use `IF NOT EXISTS`, so applying the schema again is a no-op. The version is
 stored in `PRAGMA user_version` (currently 1).
 
+> Version 0.6.0 made **no schema change**. The dashboard derives
+> "laboratories" from distinct `computer.location` values (`GROUP BY
+> location`). The CPU scheduling page uses the existing `process` table: rows
+> with `session_id` = a session are that session's saved simulation workload,
+> and rows with `session_id` NULL are the stand-alone demo workload. These rows
+> are explicit simulation inputs; they are never derived from session
+> duration.
+
 ## Entity-relationship diagram
 
 ```mermaid

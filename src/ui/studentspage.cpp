@@ -35,8 +35,7 @@ StudentsPage::StudentsPage(Services& services, QWidget* parent) : Page(parent), 
     setupTable(m_table, {QStringLiteral("Student ID"), QStringLiteral("Name"), QStringLiteral("Email"),
                          QStringLiteral("Department"), QStringLiteral("Using computer")});
     list->addWidget(m_table, 1);
-    m_empty = makeLabel(QStringLiteral("No students yet. Fill in the form to add the first one."),
-                        QStringLiteral("emptyState"));
+    m_empty = makeStateMessage();
     list->addWidget(m_empty);
     body->addWidget(listCard, 3);
 
@@ -97,8 +96,6 @@ void StudentsPage::refresh()
 {
     QString error;
     const auto students = m_services.students.listStudents(&error);
-    if (!error.isEmpty())
-        m_banner->showError(QStringLiteral("Could not load students: ") + error);
 
     QHash<QString, QString> usingComputer;
     for (const SessionRecord& r : m_services.sessions.listSessions(true, 1000))
@@ -125,14 +122,17 @@ void StudentsPage::refresh()
     if (reselect < 0 && !keep.isEmpty())
         clearForm();  // the student being edited no longer exists
 
-    m_empty->setVisible(students.empty());
-    m_table->setVisible(!students.empty());
     applyFilter();
+    if (!error.isEmpty()) {
+        m_table->hide();
+        showErrorState(m_empty, error);
+    }
 }
 
 void StudentsPage::applyFilter()
 {
     const QString needle = m_search->text().trimmed();
+    int visible = 0;
     for (int row = 0; row < m_table->rowCount(); ++row) {
         bool match = needle.isEmpty();
         for (int col = 0; col < 4 && !match; ++col) {
@@ -140,6 +140,18 @@ void StudentsPage::applyFilter()
             match = item && item->text().contains(needle, Qt::CaseInsensitive);
         }
         m_table->setRowHidden(row, !match);
+        if (match)
+            ++visible;
+    }
+    if (m_table->rowCount() == 0) {
+        m_table->hide();
+        showEmptyState(m_empty, QStringLiteral("No students registered yet. Fill in the form to add the first one."));
+    } else if (visible == 0) {
+        m_table->hide();
+        showEmptyState(m_empty, QStringLiteral("No students match \"%1\".").arg(needle));
+    } else {
+        m_table->show();
+        m_empty->hide();
     }
 }
 

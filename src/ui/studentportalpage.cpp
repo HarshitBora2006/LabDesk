@@ -127,9 +127,7 @@ QWidget* StudentPortalPage::buildDashboard()
     setupTable(m_available, {QStringLiteral("Computer ID"), QStringLiteral("Name"), QStringLiteral("Location"),
                              QStringLiteral("Status")});
     available->addWidget(m_available, 1);
-    m_noneAvailable = makeLabel(QStringLiteral("Every computer is in use or under maintenance right now. "
-                                               "Check back in a few minutes."),
-                                QStringLiteral("emptyState"));
+    m_noneAvailable = makeStateMessage();
     available->addWidget(m_noneAvailable);
     root->addWidget(availableCard, 1);
 
@@ -182,9 +180,13 @@ void StudentPortalPage::refresh()
 
     QString error;
     const auto session = m_services.sessions.activeSessionForStudent(m_studentId, &error);
-    if (!error.isEmpty())
-        m_banner->showError(QStringLiteral("Could not read your session: ") + error);
-    if (session) {
+    if (!error.isEmpty()) {
+        m_sessionStart.clear();
+        m_sessionSummary->setText(QStringLiteral("Session status unavailable"));
+        m_sessionDetails->setText(QStringLiteral("Your session could not be read from the database: ") + error);
+        m_endSession->setVisible(false);
+        m_clock->stop();
+    } else if (session) {
         m_sessionStart = session->startTime;
         m_sessionSummary->setText(QStringLiteral("You are using %1").arg(session->computerId));
         m_sessionDetails->setText(QStringLiteral("%1, %2. Started %3.")
@@ -194,14 +196,15 @@ void StudentPortalPage::refresh()
         m_clock->start();
     } else {
         m_sessionStart.clear();
-        m_sessionSummary->setText(QStringLiteral("You are not using a computer"));
+        m_sessionSummary->setText(QStringLiteral("No active computer session."));
         m_sessionDetails->setText(QStringLiteral("Choose an available computer below to start a session."));
         m_endSession->setVisible(false);
         m_clock->stop();
     }
     updateElapsed();
 
-    const auto computers = m_services.computers.listComputers(ComputerStatus::Available, &error);
+    QString listError;
+    const auto computers = m_services.computers.listComputers(ComputerStatus::Available, &listError);
     const QString keep = selectedRowData(m_available).toString();
     m_available->blockSignals(true);
     m_available->setRowCount(static_cast<int>(computers.size()));
@@ -216,8 +219,17 @@ void StudentPortalPage::refresh()
     }
     m_available->resizeColumnsToContents();
     m_available->blockSignals(false);
-    m_available->setVisible(!computers.empty());
-    m_noneAvailable->setVisible(computers.empty());
+    if (!listError.isEmpty()) {
+        m_available->hide();
+        showErrorState(m_noneAvailable, listError);
+    } else if (computers.empty()) {
+        m_available->hide();
+        showEmptyState(m_noneAvailable, QStringLiteral("No computers available for allocation. Every computer is "
+                                                       "in use or under maintenance; check back in a few minutes."));
+    } else {
+        m_available->show();
+        m_noneAvailable->hide();
+    }
     updateUseButton();
 }
 

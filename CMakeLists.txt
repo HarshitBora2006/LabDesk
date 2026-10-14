@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(LabDesk
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Smart Computer Lab Management and CPU Scheduling System"
     LANGUAGES CXX)
 
@@ -63,6 +63,7 @@ set(LABDESK_UI_SOURCES
     src/ui/page.h
     src/ui/theme.cpp                   src/ui/theme.h
     src/ui/uihelpers.cpp               src/ui/uihelpers.h
+    src/ui/layouthelpers.cpp           src/ui/layouthelpers.h
     src/ui/dashboardpage.cpp           src/ui/dashboardpage.h
     src/ui/studentspage.cpp            src/ui/studentspage.h
     src/ui/computerspage.cpp           src/ui/computerspage.h

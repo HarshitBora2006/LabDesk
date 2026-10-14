@@ -1,6 +1,6 @@
 #pragma once
-// CPU scheduling engine: FCFS, SJF (non-preemptive), Priority (non-preemptive)
-// and Round Robin. Pure C++17, independent of Qt and of the GUI.
+// CPU scheduling engine: FCFS, SJF (non-preemptive), SRTF (preemptive SJF),
+// Priority (non-preemptive) and Round Robin. Pure C++17, independent of Qt.
 //
 // Conventions (documented in README.md, tested in tests/scheduler_tests.cpp):
 //  * Time is discrete integer units starting at 0.
@@ -8,6 +8,9 @@
 //  * Ties are broken by earlier arrival, then by input order.
 //  * If no process has arrived, the CPU is idle until the next arrival
 //    (recorded as an idle slice in the timeline).
+//  * SRTF: whenever a process arrives, the ready process with the shortest
+//    REMAINING time runs. The running process is preempted only by a process
+//    with strictly shorter remaining time (equal remaining time: no switch).
 //  * Round Robin: processes that arrive at time t are enqueued BEFORE a
 //    process preempted at the same time t. If the ready queue is empty when
 //    a quantum expires, the current process simply continues (no switch).
@@ -29,9 +32,12 @@ inline constexpr int kMaxBurst = 10000;
 inline constexpr int kMaxQuantum = 10000;
 inline constexpr std::size_t kMaxProcesses = 100;
 
-enum class Algorithm { FCFS, SJF, Priority, RoundRobin };
+enum class Algorithm { FCFS, SJF, SRTF, Priority, RoundRobin };
 
 std::string algorithmName(Algorithm algorithm);
+bool isPreemptive(Algorithm algorithm);
+// Short plain-language description used by the GUI.
+std::string algorithmDescription(Algorithm algorithm);
 
 struct Process {
     std::string id;
@@ -83,6 +89,7 @@ public:
 
 private:
     static ScheduleResult runNonPreemptive(Algorithm algorithm, const std::vector<Process>& processes);
+    static ScheduleResult runShortestRemaining(const std::vector<Process>& processes);
     static ScheduleResult runRoundRobin(const std::vector<Process>& processes, int quantum);
     static void finalise(ScheduleResult& result);
 };

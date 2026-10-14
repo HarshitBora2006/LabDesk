@@ -13,10 +13,38 @@ std::string algorithmName(Algorithm algorithm)
     switch (algorithm) {
     case Algorithm::FCFS: return "FCFS";
     case Algorithm::SJF: return "SJF (non-preemptive)";
+    case Algorithm::SRTF: return "SRTF (preemptive SJF)";
     case Algorithm::Priority: return "Priority (non-preemptive)";
     case Algorithm::RoundRobin: return "Round Robin";
     }
     return "Unknown";
+}
+
+bool isPreemptive(Algorithm algorithm)
+{
+    return algorithm == Algorithm::SRTF || algorithm == Algorithm::RoundRobin;
+}
+
+std::string algorithmDescription(Algorithm algorithm)
+{
+    switch (algorithm) {
+    case Algorithm::FCFS:
+        return "First Come First Serve runs processes in the order they arrive. Each one keeps the CPU "
+               "until its burst finishes (non-preemptive). Simple, but short jobs can wait behind long ones.";
+    case Algorithm::SJF:
+        return "Shortest Job First picks, among processes that have already arrived, the one with the "
+               "smallest burst time, and lets it finish (non-preemptive). Ties go to the earlier arrival.";
+    case Algorithm::SRTF:
+        return "Shortest Remaining Time First is the preemptive form of SJF. When a process arrives with a "
+               "remaining time strictly shorter than the running process, it takes the CPU immediately.";
+    case Algorithm::Priority:
+        return "Priority scheduling runs the arrived process with the best priority. Here a LOWER number "
+               "means a HIGHER priority (0 is best). Non-preemptive; ties go to the earlier arrival.";
+    case Algorithm::RoundRobin:
+        return "Round Robin gives each ready process at most one time quantum, then moves it to the back "
+               "of the ready queue (preemptive time sharing). Smaller quanta mean more context switches.";
+    }
+    return {};
 }
 
 std::vector<std::string> validateProcesses(const std::vector<Process>& processes)
@@ -73,6 +101,8 @@ ScheduleResult Scheduler::run(Algorithm algorithm, const std::vector<Process>& p
             throw std::invalid_argument(qProblem);
         return runRoundRobin(processes, quantum);
     }
+    if (algorithm == Algorithm::SRTF)
+        return runShortestRemaining(processes);
     return runNonPreemptive(algorithm, processes);
 }
 
@@ -156,6 +186,96 @@ ScheduleResult Scheduler::runNonPreemptive(Algorithm algorithm, const std::vecto
         result.events.push_back({time, p.id, ProcessState::Running, ProcessState::Terminated,
                                  "Burst complete"});
         ++finished;
+    }
+
+    finalise(result);
+    return result;
+}
+
+ScheduleResult Scheduler::runShortestRemaining(const std::vector<Process>& processes)
+{
+    const std::size_t n = processes.size();
+    ScheduleResult result;
+    result.algorithm = Algorithm::SRTF;
+    result.processes.resize(n);
+    for (std::size_t i = 0; i < n; ++i)
+        result.processes[i].process = processes[i];
+
+    const auto order = arrivalOrder(processes);
+    std::vector<int> remaining(n);
+    for (std::size_t i = 0; i < n; ++i)
+        remaining[i] = processes[i].burst;
+
+    std::vector<std::size_t> ready;
+    std::size_t nextToAdmit = 0;
+    std::size_t finished = 0;
+    int time = 0;
+    bool running = false;
+    std::size_t current = 0;
+    int sliceStart = 0;
+
+    auto admitUpTo = [&](int t) {
+        while (nextToAdmit < n && processes[order[nextToAdmit]].arrival <= t) {
+            const std::size_t i = order[nextToAdmit++];
+            ready.push_back(i);
+            result.events.push_back({processes[i].arrival, processes[i].id, ProcessState::New,
+                                     ProcessState::Ready, "Arrived; admitted to ready queue"});
+        }
+    };
+    // Shortest remaining time; ties by earlier arrival, then input order.
+    auto better = [&](std::size_t a, std::size_t b) {
+        return std::make_tuple(remaining[a], processes[a].arrival, a)
+               < std::make_tuple(remaining[b], processes[b].arrival, b);
+    };
+
+    while (finished < n) {
+        admitUpTo(time);
+        if (!running && ready.empty()) {
+            const int next = processes[order[nextToAdmit]].arrival;
+            addIdle(result.timeline, time, next);
+            time = next;
+            continue;
+        }
+
+        if (!ready.empty()) {
+            auto best = std::min_element(ready.begin(), ready.end(), better);
+            if (running && remaining[*best] < remaining[current]) {
+                // Preemption: a strictly shorter job is ready.
+                result.timeline.push_back({processes[current].id, sliceStart, time, false});
+                result.events.push_back({time, processes[current].id, ProcessState::Running, ProcessState::Ready,
+                                         "Preempted: " + processes[*best].id + " has a shorter remaining time"});
+                ready.push_back(current);
+                running = false;
+                best = std::min_element(ready.begin(), ready.end(), better);
+            }
+            if (!running) {
+                current = *best;
+                ready.erase(best);
+                running = true;
+                sliceStart = time;
+                ProcessResult& r = result.processes[current];
+                if (r.firstStart < 0)
+                    r.firstStart = time;
+                result.events.push_back({time, processes[current].id, ProcessState::Ready, ProcessState::Running,
+                                         "Dispatched (shortest remaining time)"});
+            }
+        }
+
+        // Run until the current process finishes or the next process arrives,
+        // whichever is first: those are the only moments a decision can change.
+        int run = remaining[current];
+        if (nextToAdmit < n)
+            run = std::min(run, processes[order[nextToAdmit]].arrival - time);
+        time += run;
+        remaining[current] -= run;
+        if (remaining[current] == 0) {
+            result.processes[current].completion = time;
+            result.timeline.push_back({processes[current].id, sliceStart, time, false});
+            result.events.push_back({time, processes[current].id, ProcessState::Running, ProcessState::Terminated,
+                                     "Burst complete"});
+            running = false;
+            ++finished;
+        }
     }
 
     finalise(result);

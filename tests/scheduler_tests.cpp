@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <algorithm>
 #include <map>
 #include <random>
 #include <string>
@@ -130,6 +131,81 @@ void testPriorityTieBreak()
     check(ganttString(r) == "P1[0-2] P2[2-5] P3[5-6] ", "Priority tie-break by input order: " + ganttString(r));
 }
 
+void testSRTF()
+{
+    // Set A under SRTF (hand trace):
+    // t0 P1 runs (rem 5). t1 P2 arrives (3 < 4) -> preempt P1 (rem 4). P2 1-4 (P3=8, P4=6 do not preempt).
+    // t4 ready P1(4) P3(8) P4(6) -> P1 4-8. P4 8-14. P3 14-22.
+    // CT P1 8, P2 4, P3 22, P4 14   TAT 8,3,20,11 (42 -> 10.5)   WT 3,0,12,5 (20 -> 5.0)  RT 0,0,12,5 (4.25)
+    const auto r = Scheduler::run(Algorithm::SRTF, setA());
+    expectMetrics(r, {{"P1", 8, 8, 3, 0}, {"P2", 4, 3, 0, 1}, {"P3", 22, 20, 12, 14}, {"P4", 14, 11, 5, 8}},
+                  "SRTF");
+    check(near(r.averageTurnaround, 10.5), "SRTF avg TAT 10.5");
+    check(near(r.averageWaiting, 5.0), "SRTF avg WT 5.0");
+    check(near(r.averageResponse, 4.25), "SRTF avg RT 4.25");
+    check(ganttString(r) == "P1[0-1] P2[1-4] P1[4-8] P4[8-14] P3[14-22] ", "SRTF gantt: " + ganttString(r));
+    check(byId(r, "P1").response == 0 && byId(r, "P2").response == 0, "SRTF response times 0 for P1, P2");
+}
+
+void testSRTFTextbook()
+{
+    // Silberschatz, Operating System Concepts: P1(0,8) P2(1,4) P3(2,9) P4(3,5)
+    // Gantt P1 0-1, P2 1-5, P4 5-10, P1 10-17, P3 17-26; average waiting time 6.5 (published result).
+    const auto r = Scheduler::run(Algorithm::SRTF, {{"P1", 0, 8, 0}, {"P2", 1, 4, 0}, {"P3", 2, 9, 0}, {"P4", 3, 5, 0}});
+    check(ganttString(r) == "P1[0-1] P2[1-5] P4[5-10] P1[10-17] P3[17-26] ", "SRTF textbook gantt: " + ganttString(r));
+    check(near(r.averageWaiting, 6.5), "SRTF textbook avg WT 6.5");
+    expectMetrics(r, {{"P1", 17, 17, 9, 0}, {"P2", 5, 4, 0, 1}, {"P3", 26, 24, 15, 17}, {"P4", 10, 7, 2, 5}},
+                  "SRTF-book");
+}
+
+void testSRTFNoPreemptOnTie()
+{
+    // At t=2 P1 has 2 left and P2 needs 2: equal, so P1 is NOT preempted. P1 0-4, P2 4-6.
+    const auto r = Scheduler::run(Algorithm::SRTF, {{"P1", 0, 4, 0}, {"P2", 2, 2, 0}});
+    check(ganttString(r) == "P1[0-4] P2[4-6] ", "SRTF does not preempt on equal remaining time: " + ganttString(r));
+    check(r.contextSwitches == 1, "SRTF tie: one context switch");
+}
+
+void testExplanations()
+{
+    using S = ProcessState;
+    check(explainInvalidTransition("P1", S::New, S::Ready).empty(), "valid transition has no explanation");
+    check(explainInvalidTransition("P1", S::New, S::Running).find("admitted") != std::string::npos,
+          "NEW->RUNNING explains admission is needed");
+    check(explainInvalidTransition("P1", S::Waiting, S::Running).find("I/O") != std::string::npos,
+          "WAITING->RUNNING explains I/O must complete");
+    check(explainInvalidTransition("P1", S::Ready, S::Waiting).find("RUNNING") != std::string::npos,
+          "READY->WAITING explains only RUNNING can block");
+    check(explainInvalidTransition("P1", S::Ready, S::Terminated).find("RUNNING") != std::string::npos,
+          "READY->TERMINATED explains it must run first");
+    check(explainInvalidTransition("P1", S::Terminated, S::Ready).find("finished") != std::string::npos,
+          "TERMINATED is final");
+    check(explainInvalidTransition("P1", S::Ready, S::Ready).find("already") != std::string::npos,
+          "same-state request explained");
+    // Every invalid pair gets a non-empty explanation; every valid pair gets none.
+    bool consistent = true;
+    for (S from : {S::New, S::Ready, S::Running, S::Waiting, S::Terminated})
+        for (S to : {S::New, S::Ready, S::Running, S::Waiting, S::Terminated})
+            consistent &= isValidTransition(from, to) == explainInvalidTransition("P", from, to).empty();
+    check(consistent, "explanations exist exactly for the invalid transitions (25 pairs)");
+    for (S s : {S::New, S::Ready, S::Running, S::Waiting, S::Terminated})
+        check(!stateDescription(s).empty(), std::string("description for ") + toString(s));
+}
+
+void testNamedProcesses()
+{
+    LifecycleSimulator sim;
+    std::string err;
+    check(sim.createProcess("P1", &err) && sim.createProcess("P2", &err), "create named P1, P2");
+    check(!sim.createProcess("P1", &err) && err.find("already exists") != std::string::npos, "duplicate id rejected");
+    check(!sim.createProcess("", &err), "empty id rejected");
+    const std::string next = sim.createProcess();
+    check(next == "P3", "auto id skips ids already in use (got " + next + ")");
+    check(sim.find("P1")->state == ProcessState::New, "named process starts NEW");
+    check(!sim.apply("P1", ProcessState::Running, &err) && err.find("admitted") != std::string::npos,
+          "simulator returns the plain-language explanation");
+}
+
 void testRoundRobin()
 {
     // q=2. Arrivals at t are queued before the preempted process.
@@ -158,7 +234,8 @@ void testIdleHandling()
 {
     // P1 arrives 2 (BT 3), P2 arrives 10 (BT 2): idle 0-2, P1 2-5, idle 5-10, P2 10-12
     const std::vector<Process> procs{{"P1", 2, 3, 2}, {"P2", 10, 2, 1}};
-    for (Algorithm a : {Algorithm::FCFS, Algorithm::SJF, Algorithm::Priority, Algorithm::RoundRobin}) {
+    for (Algorithm a : {Algorithm::FCFS, Algorithm::SJF, Algorithm::SRTF, Algorithm::Priority,
+                        Algorithm::RoundRobin}) {
         const auto r = Scheduler::run(a, procs, 1);
         const std::string tag = algorithmName(a);
         check(ganttString(r) == "idle[0-2] P1[2-5] idle[5-10] P2[10-12] ", tag + " idle gantt: " + ganttString(r));
@@ -205,8 +282,15 @@ void testRandomInvariants()
             procs.push_back({"P" + std::to_string(i + 1), arrival(rng), burst(rng), prio(rng)});
             totalBurst += procs.back().burst;
         }
-        for (Algorithm a : {Algorithm::FCFS, Algorithm::SJF, Algorithm::Priority, Algorithm::RoundRobin}) {
+        double srtfWaiting = 0;
+        double minOtherWaiting = 1e18;
+        for (Algorithm a : {Algorithm::SRTF, Algorithm::FCFS, Algorithm::SJF, Algorithm::Priority,
+                            Algorithm::RoundRobin}) {
             const auto r = Scheduler::run(a, procs, quantum(rng));
+            if (a == Algorithm::SRTF)
+                srtfWaiting = r.averageWaiting;
+            else
+                minOtherWaiting = std::min(minOtherWaiting, r.averageWaiting);
             bool ok = true;
             std::map<std::string, int> executed;
             std::map<std::string, int> slices;
@@ -230,7 +314,7 @@ void testRandomInvariants()
                 ok &= p.turnaround == p.completion - p.process.arrival;
                 ok &= p.waiting == p.turnaround - p.process.burst;
                 ok &= p.waiting >= 0;
-                if (a != Algorithm::RoundRobin)
+                if (!isPreemptive(a))
                     ok &= slices[p.process.id] == 1;  // non-preemptive: one contiguous slice
             }
             // Every process's event trace must be a valid walk NEW -> ... -> TERMINATED.
@@ -252,8 +336,15 @@ void testRandomInvariants()
                 return;
             }
         }
+        // SRTF (shortest remaining processing time) minimises total waiting time on one
+        // CPU, so no other algorithm may beat it on the same workload.
+        if (srtfWaiting > minOtherWaiting + 1e-9) {
+            check(false, "SRTF optimality violated in trial " + std::to_string(trial));
+            return;
+        }
     }
-    check(true, "random invariants (400 workloads x 4 algorithms)");
+    check(true, "random invariants (400 workloads x 5 algorithms)");
+    check(true, "SRTF average waiting time <= every other algorithm on all 400 workloads");
 }
 
 void testProcessStateMachine()
@@ -296,6 +387,9 @@ int main()
     testFCFS();
     testSJF();
     testSJFDoesNotRunBeforeArrival();
+    testSRTF();
+    testSRTFTextbook();
+    testSRTFNoPreemptOnTie();
     testPriority();
     testPriorityTieBreak();
     testRoundRobin();
@@ -304,6 +398,8 @@ int main()
     testValidation();
     testRandomInvariants();
     testProcessStateMachine();
+    testExplanations();
+    testNamedProcesses();
     std::cout << g_passed << " passed, " << g_failed << " failed\n";
     return g_failed == 0 ? 0 : 1;
 }

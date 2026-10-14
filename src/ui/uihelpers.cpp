@@ -7,6 +7,8 @@
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSizePolicy>
 #include <QStyle>
 #include <QTableWidget>
 #include <QTimer>
@@ -107,9 +109,10 @@ QVariant selectedRowData(const QTableWidget* table, int column)
 QVBoxLayout* makePageLayout(QWidget* page, const QString& title, const QString& subtitle)
 {
     page->setObjectName(QStringLiteral("pageRoot"));
+    page->setAttribute(Qt::WA_StyledBackground, true);
     auto* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(28, 22, 28, 22);
-    layout->setSpacing(14);
+    layout->setContentsMargins(32, 26, 32, 28);
+    layout->setSpacing(16);
     auto* header = new QVBoxLayout();
     header->setSpacing(2);
     header->addWidget(makeLabel(title, QStringLiteral("pageTitle")));
@@ -117,6 +120,75 @@ QVBoxLayout* makePageLayout(QWidget* page, const QString& title, const QString& 
         header->addWidget(makeLabel(subtitle, QStringLiteral("pageSubtitle")));
     layout->addLayout(header);
     return layout;
+}
+
+QWidget* makeScrollPage(QWidget* page)
+{
+    auto* outer = new QVBoxLayout(page);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    auto* scroll = new QScrollArea();
+    scroll->setObjectName(QStringLiteral("pageScroll"));
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* body = new QWidget();
+    body->setObjectName(QStringLiteral("pageScrollBody"));
+    body->setAttribute(Qt::WA_StyledBackground, true);
+    scroll->setWidget(body);
+    outer->addWidget(scroll);
+    return body;
+}
+
+QLabel* makeExplainer(const QString& text)
+{
+    auto* label = makeLabel(text, QStringLiteral("explainer"));
+    label->setTextFormat(Qt::PlainText);
+    return label;
+}
+
+QLabel* makeStatusChip(const QString& status, const QString& text)
+{
+    const theme::StatusColors c = theme::statusColors(status);
+    auto* chip = new QLabel(text);
+    chip->setStyleSheet(QStringLiteral("background:%1; color:%2; border-radius:10px; padding:3px 10px; "
+                                       "font-weight:600;")
+                            .arg(c.background.name(), c.foreground.name()));
+    chip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    return chip;
+}
+
+QLabel* makeStateMessage()
+{
+    auto* label = new QLabel();
+    label->setObjectName(QStringLiteral("stateMessage"));
+    label->setWordWrap(true);
+    label->setAlignment(Qt::AlignCenter);
+    label->hide();
+    return label;
+}
+
+void repolish(QWidget* widget)
+{
+    widget->style()->unpolish(widget);
+    widget->style()->polish(widget);
+    widget->update();
+}
+
+void showEmptyState(QLabel* label, const QString& text)
+{
+    label->setProperty("kind", QStringLiteral("empty"));
+    repolish(label);
+    label->setText(text);
+    label->show();
+}
+
+void showErrorState(QLabel* label, const QString& text)
+{
+    label->setProperty("kind", QStringLiteral("error"));
+    repolish(label);
+    label->setText(QStringLiteral("Could not load this section from the database.\n") + text);
+    label->show();
 }
 
 bool confirm(QWidget* parent, const QString& title, const QString& text, const QString& acceptText)
@@ -135,29 +207,32 @@ MessageBanner::MessageBanner(QWidget* parent) : QLabel(parent)
 {
     setObjectName(QStringLiteral("banner"));
     setWordWrap(true);
+    setTextFormat(Qt::RichText);
     setTextInteractionFlags(Qt::TextSelectableByMouse);
     hide();
 }
 
-void MessageBanner::showKind(const QString& kind, const QString& text, bool autoHide)
+void MessageBanner::showKind(const QString& kind, const QString& prefix, const QString& text, bool autoHide)
 {
     setProperty("kind", kind);
-    style()->unpolish(this);
-    style()->polish(this);
-    setText(text);
+    repolish(this);
+    QString body = text.toHtmlEscaped();
+    body.replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+    setText(QStringLiteral("<b>%1</b>&nbsp;&nbsp;%2").arg(prefix, body));
     show();
     const int generation = ++m_generation;
-    if (autoHide) {
-        QTimer::singleShot(7000, this, [this, generation]() {
+    if (autoHide && !m_persistent) {
+        QTimer::singleShot(8000, this, [this, generation]() {
             if (generation == m_generation)
                 hide();
         });
     }
 }
 
-void MessageBanner::showSuccess(const QString& text) { showKind(QStringLiteral("success"), text, true); }
-void MessageBanner::showError(const QString& text) { showKind(QStringLiteral("error"), text, false); }
-void MessageBanner::showInfo(const QString& text) { showKind(QStringLiteral("info"), text, true); }
+void MessageBanner::showSuccess(const QString& text) { showKind(QStringLiteral("success"), QStringLiteral("Success"), text, true); }
+void MessageBanner::showInfo(const QString& text) { showKind(QStringLiteral("info"), QStringLiteral("Note"), text, true); }
+void MessageBanner::showWarning(const QString& text) { showKind(QStringLiteral("warning"), QStringLiteral("Warning"), text, false); }
+void MessageBanner::showError(const QString& text) { showKind(QStringLiteral("error"), QStringLiteral("Error"), text, false); }
 
 void MessageBanner::clearMessage()
 {

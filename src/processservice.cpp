@@ -41,6 +41,20 @@ std::vector<StoredProcess> ProcessService::loadWorkload(std::optional<qint64> se
     return out;
 }
 
+bool ProcessService::workloadSizes(QHash<qint64, int>& out, QString* error) const
+{
+    out.clear();
+    QSqlQuery q(m_db.connection());
+    if (!q.exec(QStringLiteral("SELECT IFNULL(session_id, -1), COUNT(*) FROM process GROUP BY session_id"))) {
+        if (error)
+            *error = q.lastError().text();
+        return false;
+    }
+    while (q.next())
+        out.insert(q.value(0).toLongLong(), q.value(1).toInt());
+    return true;
+}
+
 OpResult ProcessService::saveWorkload(std::optional<qint64> sessionId,
                                       const std::vector<StoredProcess>& processes) const
 {

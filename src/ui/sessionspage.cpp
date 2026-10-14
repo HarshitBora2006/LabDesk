@@ -39,6 +39,8 @@ SessionsPage::SessionsPage(Database& db, Services& services, QWidget* parent)
 QWidget* SessionsPage::buildHistoryTab()
 {
     auto* tab = new QWidget();
+    tab->setObjectName(QStringLiteral("tabPage"));
+    tab->setAttribute(Qt::WA_StyledBackground, true);
     auto* layout = new QVBoxLayout(tab);
     layout->setContentsMargins(14, 14, 14, 14);
     auto* header = new QHBoxLayout();
@@ -54,8 +56,7 @@ QWidget* SessionsPage::buildHistoryTab()
                          QStringLiteral("Location"), QStringLiteral("Started"), QStringLiteral("Ended"),
                          QStringLiteral("Duration"), QStringLiteral("Status")});
     layout->addWidget(m_table, 1);
-    m_empty = makeLabel(QStringLiteral("No sessions yet. Students start one from the student portal."),
-                        QStringLiteral("emptyState"));
+    m_empty = makeStateMessage();
     layout->addWidget(m_empty);
     layout->addWidget(makeLabel(QStringLiteral("Ended sessions are kept permanently; the database rejects any "
                                                "attempt to modify or delete them."),
@@ -79,6 +80,8 @@ QWidget* SessionsPage::buildHistoryTab()
 QWidget* SessionsPage::buildTransactionTab()
 {
     auto* tab = new QWidget();
+    tab->setObjectName(QStringLiteral("tabPage"));
+    tab->setAttribute(Qt::WA_StyledBackground, true);
     auto* layout = new QVBoxLayout(tab);
     layout->setContentsMargins(14, 14, 14, 14);
     layout->setSpacing(10);
@@ -139,8 +142,6 @@ void SessionsPage::reloadHistory()
 {
     QString error;
     const auto sessions = m_services.sessions.listSessions(m_activeOnly->isChecked(), 500, &error);
-    if (!error.isEmpty())
-        m_banner->showError(QStringLiteral("Could not load sessions: ") + error);
     m_table->setRowCount(static_cast<int>(sessions.size()));
     for (int row = 0; row < static_cast<int>(sessions.size()); ++row) {
         const SessionRecord& s = sessions[static_cast<std::size_t>(row)];
@@ -154,8 +155,19 @@ void SessionsPage::reloadHistory()
         m_table->setItem(row, 7, makeStatusItem(s.status));
     }
     m_table->resizeColumnsToContents();
-    m_empty->setVisible(sessions.empty());
-    m_table->setVisible(!sessions.empty());
+    if (!error.isEmpty()) {
+        m_table->hide();
+        showErrorState(m_empty, error);
+    } else if (sessions.empty()) {
+        m_table->hide();
+        showEmptyState(m_empty, m_activeOnly->isChecked()
+                                    ? QStringLiteral("No active computer sessions right now.")
+                                    : QStringLiteral("No sessions recorded yet. Students start one from the "
+                                                     "Student portal."));
+    } else {
+        m_table->show();
+        m_empty->hide();
+    }
     m_endSelected->setEnabled(false);
 }
 

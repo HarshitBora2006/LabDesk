@@ -40,6 +40,8 @@ public:
     OpResult endActiveSession(const QString& studentId, const StepLogger& log = StepLogger()) const;
     OpResult endSessionById(qint64 sessionId, const StepLogger& log = StepLogger()) const;
 
+    // Any session (active or ended) by id, joined with student and computer details.
+    std::optional<SessionRecord> findSession(qint64 sessionId, QString* error = nullptr) const;
     std::optional<SessionRecord> activeSessionForStudent(const QString& studentId, QString* error = nullptr) const;
     std::vector<SessionRecord> listSessions(bool activeOnly, int limit = 500, QString* error = nullptr) const;
 

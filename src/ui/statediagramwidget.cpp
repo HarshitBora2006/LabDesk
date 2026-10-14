@@ -81,11 +81,11 @@ void StateDiagramWidget::paintEvent(QPaintEvent*)
     drawArrow(p, {rn.x() - hw, rn.y() + 8}, {rd.x() + hw, rd.y() + 8}, edgeColor(S::Running, S::Ready),
               QStringLiteral("preempt"), {0, 14});
     drawArrow(p, {rn.x() + hw, rn.y()}, {tm.x() - hw, tm.y()}, edgeColor(S::Running, S::Terminated),
-              QStringLiteral("exit"), {0, -14});
+              QStringLiteral("terminate"), {0, -14});
     drawArrow(p, {rn.x(), rn.y() + hh}, {wt.x() + hw * 0.6, wt.y() - hh}, edgeColor(S::Running, S::Waiting),
-              QStringLiteral("I/O or event wait"), {58, 0});
+              QStringLiteral("block for I/O"), {58, 0});
     drawArrow(p, {wt.x() - hw * 0.6, wt.y() - hh}, {rd.x(), rd.y() + hh}, edgeColor(S::Waiting, S::Ready),
-              QStringLiteral("I/O done"), {-46, 0});
+              QStringLiteral("complete I/O"), {-46, 0});
 
     QFont bold = font();
     bold.setBold(true);

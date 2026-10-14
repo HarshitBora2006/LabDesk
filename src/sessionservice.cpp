@@ -266,6 +266,21 @@ OpResult SessionService::endSession(std::optional<qint64> sessionIdIn, const QSt
                      sessionId);
 }
 
+std::optional<SessionRecord> SessionService::findSession(qint64 sessionId, QString* error) const
+{
+    QSqlQuery q(m_db.connection());
+    q.prepare(kSessionSelect + QStringLiteral("WHERE s.session_id = ?"));
+    q.addBindValue(sessionId);
+    if (!q.exec()) {
+        if (error)
+            *error = q.lastError().text();
+        return std::nullopt;
+    }
+    if (!q.next())
+        return std::nullopt;
+    return readSession(q);
+}
+
 std::optional<SessionRecord> SessionService::activeSessionForStudent(const QString& studentId, QString* error) const
 {
     QSqlQuery q(m_db.connection());

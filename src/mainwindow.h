@@ -31,6 +31,7 @@ private:
     void addPage(const QString& title, ui::Page* page);
     void refreshAll();
     void onNavigation(int row);
+    void showPage(QWidget* page);
 
     Database& m_db;
     std::unique_ptr<Services> m_services;

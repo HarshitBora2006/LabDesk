@@ -38,6 +38,7 @@ MainWindow::MainWindow(Database& db, QWidget* parent)
 
     auto* sidebar = new QWidget();
     sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setAttribute(Qt::WA_StyledBackground, true);
     sidebar->setFixedWidth(232);
     auto* side = new QVBoxLayout(sidebar);
     side->setContentsMargins(0, 0, 0, 12);
@@ -58,6 +59,8 @@ MainWindow::MainWindow(Database& db, QWidget* parent)
     side->addWidget(reload, 0, Qt::AlignHCenter);
 
     m_stack = new QStackedWidget();
+    m_stack->setObjectName(QStringLiteral("pageStack"));
+    m_stack->setAttribute(Qt::WA_StyledBackground, true);
     layout->addWidget(sidebar);
     layout->addWidget(m_stack, 1);
     setCentralWidget(central);
@@ -65,11 +68,13 @@ MainWindow::MainWindow(Database& db, QWidget* parent)
     Services& s = *m_services;
     auto* scheduler = new ui::SchedulerPage(s);
     auto* processStates = new ui::ProcessStatePage();
+    auto* dashboard = new ui::DashboardPage(s);
+    auto* computers = new ui::ComputersPage(s);
 
     addSection(QStringLiteral("Administration"));
-    addPage(QStringLiteral("Dashboard"), new ui::DashboardPage(s));
+    addPage(QStringLiteral("Dashboard"), dashboard);
     addPage(QStringLiteral("Students"), new ui::StudentsPage(s));
-    addPage(QStringLiteral("Computers"), new ui::ComputersPage(s));
+    addPage(QStringLiteral("Computers"), computers);
     addPage(QStringLiteral("Maintenance"), new ui::MaintenancePage(s));
     addPage(QStringLiteral("Sessions and transactions"), new ui::SessionsPage(m_db, s));
     addSection(QStringLiteral("Students"));
@@ -79,6 +84,10 @@ MainWindow::MainWindow(Database& db, QWidget* parent)
     addPage(QStringLiteral("Process states"), processStates);
 
     connect(scheduler, &ui::SchedulerPage::scheduleComputed, processStates, &ui::ProcessStatePage::showSchedule);
+    connect(dashboard, &ui::DashboardPage::openComputers, this, [this, computers](const QString& location) {
+        showPage(computers);
+        computers->showLocation(location);
+    });
     connect(m_nav, &QListWidget::currentRowChanged, this, &MainWindow::onNavigation);
     connect(reload, &QPushButton::clicked, this, [this]() {
         refreshAll();
@@ -118,6 +127,17 @@ void MainWindow::refreshAll()
 {
     for (ui::Page* page : m_pages)
         page->refresh();
+}
+
+void MainWindow::showPage(QWidget* page)
+{
+    const int index = m_stack->indexOf(page);
+    for (int row = 0; row < m_nav->count(); ++row) {
+        if (m_nav->item(row)->data(Qt::UserRole).toInt() == index) {
+            m_nav->setCurrentRow(row);  // triggers onNavigation, which refreshes the page
+            return;
+        }
+    }
 }
 
 void MainWindow::onNavigation(int row)

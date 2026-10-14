@@ -28,6 +28,13 @@ bool isValidTransition(ProcessState from, ProcessState to);
 // Human-readable name of a transition ("Admit", "Dispatch", ...); empty if invalid.
 std::string transitionName(ProcessState from, ProcessState to);
 
+// Plain-language meaning of a state, for the GUI legend.
+std::string stateDescription(ProcessState state);
+
+// Why `from -> to` is not allowed, in plain language for the given process id.
+// Returns an empty string when the transition IS allowed by the state diagram.
+std::string explainInvalidTransition(const std::string& processId, ProcessState from, ProcessState to);
+
 // All states reachable in one valid step from `from`.
 std::vector<ProcessState> validNextStates(ProcessState from);
 
@@ -52,8 +59,12 @@ class LifecycleSimulator {
 public:
     std::string createProcess();  // returns the new id ("P1", "P2", ...), state NEW
 
-    // Applies a transition. Returns false and fills `error` if the transition
-    // is not allowed by the state diagram or by the single-CPU rule.
+    // Creates a process with a caller-chosen id (e.g. taken from a scheduler
+    // workload). Fails if the id is empty, longer than 16 characters or taken.
+    bool createProcess(const std::string& id, std::string* error);
+
+    // Applies a transition. Returns false and fills `error` with a plain-language
+    // reason if it is not allowed by the state diagram or by the single-CPU rule.
     bool apply(const std::string& processId, ProcessState to, std::string* error = nullptr);
 
     std::optional<std::string> runningProcess() const;

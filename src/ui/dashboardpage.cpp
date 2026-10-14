@@ -1,170 +1,284 @@
 #include "dashboardpage.h"
 
+#include "layouthelpers.h"
 #include "services.h"
 #include "theme.h"
 #include "timeutil.h"
 #include "uihelpers.h"
 
 #include <QFrame>
-#include <QGridLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
-#include <QScrollArea>
-#include <QStyle>
+#include <QMap>
+#include <QProgressBar>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 namespace labdesk::ui {
 
+namespace {
+QString percent(int part, int whole)
+{
+    if (whole <= 0)
+        return QStringLiteral("0 %");
+    return QStringLiteral("%1 %").arg(qRound(100.0 * part / whole));
+}
+}  // namespace
+
 DashboardPage::DashboardPage(Services& services, QWidget* parent) : Page(parent), m_services(services)
 {
-    QVBoxLayout* root = makePageLayout(this, QStringLiteral("Dashboard"),
-                                       QStringLiteral("Live figures read from the database on every refresh."));
+    QWidget* body = makeScrollPage(this);
+    QVBoxLayout* root = makePageLayout(
+        body, QStringLiteral("Dashboard"),
+        QStringLiteral("Live figures read from the database each time this page is shown or data changes."));
 
-    auto* stats = new QGridLayout();
-    stats->setHorizontalSpacing(12);
-    stats->setVerticalSpacing(12);
-    stats->addWidget(makeStat(QStringLiteral("total"), QStringLiteral("Total computers"), QStringLiteral("#1E2B45")), 0, 0);
-    stats->addWidget(makeStat(QStringLiteral("available"), QStringLiteral("Available"), QStringLiteral("#24634F")), 0, 1);
-    stats->addWidget(makeStat(QStringLiteral("occupied"), QStringLiteral("Occupied"), QStringLiteral("#7E550F")), 0, 2);
-    stats->addWidget(makeStat(QStringLiteral("maintenance"), QStringLiteral("Under maintenance"), QStringLiteral("#3F4D68")), 1, 0);
-    stats->addWidget(makeStat(QStringLiteral("sessions"), QStringLiteral("Active sessions"), QStringLiteral("#1E2B45")), 1, 1);
-    stats->addWidget(makeStat(QStringLiteral("students"), QStringLiteral("Registered students"), QStringLiteral("#1E2B45")), 1, 2);
-    root->addLayout(stats);
+    m_banner = new MessageBanner();
+    root->addWidget(m_banner);
 
-    m_consistency = makeLabel(QString(), QStringLiteral("banner"));
+    // Headline figures: equal-width cards that reflow with the window width.
+    m_stats = new ResponsiveGrid(165, 14);
+    m_stats->setWidgets({makeStat(QStringLiteral("labs"), QStringLiteral("Laboratories")),
+                         makeStat(QStringLiteral("total"), QStringLiteral("Total computers")),
+                         makeStat(QStringLiteral("available"), QStringLiteral("Available")),
+                         makeStat(QStringLiteral("occupied"), QStringLiteral("Occupied")),
+                         makeStat(QStringLiteral("maintenance"), QStringLiteral("Under maintenance")),
+                         makeStat(QStringLiteral("sessions"), QStringLiteral("Active sessions")),
+                         makeStat(QStringLiteral("occupancy"), QStringLiteral("Lab occupancy"))});
+    root->addWidget(m_stats);
+
+    m_consistency = new MessageBanner();
+    m_consistency->setPersistent(true);
     root->addWidget(m_consistency);
 
-    auto* lower = new QHBoxLayout();
-    lower->setSpacing(12);
+    // Laboratories section
+    auto* labHeader = new QHBoxLayout();
+    labHeader->setSpacing(10);
+    auto* labTitles = new QVBoxLayout();
+    labTitles->setSpacing(2);
+    labTitles->addWidget(makeLabel(QStringLiteral("Laboratories"), QStringLiteral("sectionTitle")));
+    labTitles->addWidget(makeLabel(QStringLiteral("Each laboratory is a distinct computer location. Occupancy = "
+                                                  "occupied computers / all computers in that laboratory."),
+                                   QStringLiteral("caption")));
+    labHeader->addLayout(labTitles, 1);
+    labHeader->addWidget(makeStatusChip(ComputerStatus::Available, QStringLiteral("Available")), 0, Qt::AlignBottom);
+    labHeader->addWidget(makeStatusChip(ComputerStatus::Occupied, QStringLiteral("Occupied")), 0, Qt::AlignBottom);
+    labHeader->addWidget(makeStatusChip(ComputerStatus::Maintenance, QStringLiteral("Maintenance")), 0,
+                         Qt::AlignBottom);
+    root->addLayout(labHeader);
 
-    QFrame* floorCard = makeCard();
-    QVBoxLayout* floorLayout = cardLayout(floorCard);
-    floorLayout->addWidget(makeLabel(QStringLiteral("Lab floor"), QStringLiteral("sectionTitle")));
-    auto* legend = new QHBoxLayout();
-    for (const QString& s : {QStringLiteral("AVAILABLE"), QStringLiteral("OCCUPIED"), QStringLiteral("MAINTENANCE")}) {
-        const auto c = theme::statusColors(s);
-        auto* chip = new QLabel(s.left(1) + s.mid(1).toLower());
-        chip->setStyleSheet(QStringLiteral("background:%1; color:%2; border-radius:4px; padding:2px 8px;")
-                                .arg(c.background.name(), c.foreground.name()));
-        legend->addWidget(chip);
-    }
-    legend->addStretch();
-    floorLayout->addLayout(legend);
-    m_floorScroll = new QScrollArea();
-    m_floorScroll->setWidgetResizable(true);
-    m_floorScroll->setFrameShape(QFrame::NoFrame);
-    m_floorScroll->setMinimumHeight(220);
-    floorLayout->addWidget(m_floorScroll, 1);
-    lower->addWidget(floorCard, 3);
+    m_labs = new ResponsiveGrid(340, 16);
+    root->addWidget(m_labs);
+    m_labsState = makeStateMessage();
+    root->addWidget(m_labsState);
 
+    // Active sessions
     QFrame* activeCard = makeCard();
-    QVBoxLayout* activeLayout = cardLayout(activeCard);
-    activeLayout->addWidget(makeLabel(QStringLiteral("Active sessions"), QStringLiteral("sectionTitle")));
+    QVBoxLayout* active = cardLayout(activeCard);
+    active->addWidget(makeLabel(QStringLiteral("Active sessions"), QStringLiteral("sectionTitle")));
     m_activeTable = new QTableWidget();
-    setupTable(m_activeTable, {QStringLiteral("Student"), QStringLiteral("Computer"), QStringLiteral("Started")});
-    activeLayout->addWidget(m_activeTable, 1);
-    m_activeEmpty = makeLabel(QStringLiteral("No one is using a lab computer right now."), QStringLiteral("emptyState"));
-    activeLayout->addWidget(m_activeEmpty);
-    lower->addWidget(activeCard, 2);
-
-    root->addLayout(lower, 1);
+    setupTable(m_activeTable, {QStringLiteral("Student"), QStringLiteral("Computer"), QStringLiteral("Laboratory"),
+                               QStringLiteral("Started"), QStringLiteral("Elapsed")});
+    m_activeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_activeTable->setMinimumHeight(180);
+    active->addWidget(m_activeTable);
+    m_activeState = makeStateMessage();
+    active->addWidget(m_activeState);
+    root->addWidget(activeCard);
+    root->addStretch(1);
 }
 
-QWidget* DashboardPage::makeStat(const QString& key, const QString& label, const QString& accent)
+QWidget* DashboardPage::makeStat(const QString& key, const QString& label)
 {
     QFrame* card = makeCard();
     QVBoxLayout* layout = cardLayout(card);
     layout->setSpacing(2);
-    auto* value = makeLabel(QStringLiteral("-"), QStringLiteral("statValue"));
-    value->setStyleSheet(QStringLiteral("color:%1;").arg(accent));
-    layout->addWidget(value);
     layout->addWidget(makeLabel(label, QStringLiteral("statLabel")));
+    auto* value = makeLabel(QStringLiteral("-"), QStringLiteral("statValue"));
+    layout->addWidget(value);
+    auto* caption = makeLabel(QString(), QStringLiteral("caption"));
+    layout->addWidget(caption);
+    layout->addStretch(1);
     m_statValues.insert(key, value);
+    m_statCaptions.insert(key, caption);
     return card;
+}
+
+void DashboardPage::setStat(const QString& key, const QString& value, const QString& caption)
+{
+    if (QLabel* v = m_statValues.value(key))
+        v->setText(value);
+    if (QLabel* c = m_statCaptions.value(key))
+        c->setText(caption);
 }
 
 void DashboardPage::refresh()
 {
+    m_banner->clearMessage();
     QString error;
     const DashboardStats s = m_services.computers.dashboardStats(&error);
-    m_statValues.value(QStringLiteral("total"))->setText(QString::number(s.totalComputers));
-    m_statValues.value(QStringLiteral("available"))->setText(QString::number(s.available));
-    m_statValues.value(QStringLiteral("occupied"))->setText(QString::number(s.occupied));
-    m_statValues.value(QStringLiteral("maintenance"))->setText(QString::number(s.maintenance));
-    m_statValues.value(QStringLiteral("sessions"))->setText(QString::number(s.activeSessions));
-    m_statValues.value(QStringLiteral("students"))->setText(QString::number(s.students));
-
-    const QStringList problems = m_services.computers.consistencyProblems(&error);
-    QString kind;
     if (!error.isEmpty()) {
-        kind = QStringLiteral("error");
-        m_consistency->setText(QStringLiteral("Could not read the database: ") + error);
-    } else if (problems.isEmpty()) {
-        kind = QStringLiteral("success");
-        m_consistency->setText(
-            QStringLiteral("Consistency check passed: every OCCUPIED computer has exactly one active session, "
-                           "and every computer in MAINTENANCE has an open issue (%1 open).")
-                .arg(s.openMaintenance));
+        m_banner->showError(QStringLiteral("Dashboard figures could not be read: ") + error);
+        for (const QString& key : m_statValues.keys())
+            setStat(key, QStringLiteral("-"), QStringLiteral("unavailable"));
     } else {
-        kind = QStringLiteral("error");
-        m_consistency->setText(QStringLiteral("Consistency problems found:\n") + problems.join(QLatin1Char('\n')));
+        setStat(QStringLiteral("labs"), QString::number(s.laboratories), QStringLiteral("distinct locations"));
+        setStat(QStringLiteral("total"), QString::number(s.totalComputers), QStringLiteral("in the inventory"));
+        setStat(QStringLiteral("available"), QString::number(s.available), QStringLiteral("ready for students"));
+        setStat(QStringLiteral("occupied"), QString::number(s.occupied), QStringLiteral("in use right now"));
+        setStat(QStringLiteral("maintenance"), QString::number(s.maintenance),
+                QStringLiteral("%1 open issue(s)").arg(s.openMaintenance));
+        setStat(QStringLiteral("sessions"), QString::number(s.activeSessions),
+                QStringLiteral("%1 student(s) registered").arg(s.students));
+        setStat(QStringLiteral("occupancy"), percent(s.occupied, s.totalComputers),
+                QStringLiteral("%1 of %2 computers in use").arg(s.occupied).arg(s.totalComputers));
     }
-    m_consistency->setProperty("kind", kind);
-    m_consistency->style()->unpolish(m_consistency);
-    m_consistency->style()->polish(m_consistency);
 
-    const auto active = m_services.sessions.listSessions(true, 500);
-    m_activeTable->setRowCount(static_cast<int>(active.size()));
-    for (int row = 0; row < static_cast<int>(active.size()); ++row) {
-        const SessionRecord& r = active[static_cast<std::size_t>(row)];
-        m_activeTable->setItem(row, 0, makeItem(QStringLiteral("%1 (%2)").arg(r.studentName, r.studentId)));
-        m_activeTable->setItem(row, 1, makeItem(r.computerId));
-        m_activeTable->setItem(row, 2, makeItem(timeutil::toDisplay(r.startTime)));
-    }
-    m_activeTable->resizeColumnsToContents();
-    m_activeTable->setVisible(!active.empty());
-    m_activeEmpty->setVisible(active.empty());
+    QString consistencyError;
+    const QStringList problems = m_services.computers.consistencyProblems(&consistencyError);
+    if (!consistencyError.isEmpty())
+        m_consistency->showError(QStringLiteral("Consistency check could not run: ") + consistencyError);
+    else if (problems.isEmpty())
+        m_consistency->showSuccess(QStringLiteral("Consistency check passed. Every occupied computer has exactly one "
+                                                  "active session, and every computer under maintenance has an open "
+                                                  "issue."));
+    else
+        m_consistency->showWarning(QStringLiteral("Consistency problems found:\n") + problems.join(QLatin1Char('\n')));
 
-    rebuildFloor();
+    // Who is using which computer (tooltips on the lab tiles).
+    QHash<QString, QString> usedBy;
+    QString sessionError;
+    for (const SessionRecord& r : m_services.sessions.listSessions(true, 1000, &sessionError))
+        usedBy.insert(r.computerId, QStringLiteral("%1 (%2)").arg(r.studentName, r.studentId));
+    refreshLabs(usedBy);
+    refreshActiveSessions();
 }
 
-void DashboardPage::rebuildFloor()
+QWidget* DashboardPage::makeLabCard(const LabSummary& lab, const QList<Computer>& computers,
+                                    const QHash<QString, QString>& usedBy)
 {
-    QHash<QString, QString> usedBy;
-    for (const SessionRecord& r : m_services.sessions.listSessions(true, 1000))
-        usedBy.insert(r.computerId, r.studentName + QStringLiteral(" (") + r.studentId + QLatin1Char(')'));
+    QFrame* card = makeCard();
+    QVBoxLayout* layout = cardLayout(card);
+    layout->setSpacing(12);
 
-    auto* body = new QWidget();
-    auto* grid = new QGridLayout(body);
-    grid->setContentsMargins(0, 0, 0, 0);
-    grid->setSpacing(8);
-    const auto computers = m_services.computers.listComputers();
-    if (computers.empty()) {
-        grid->addWidget(makeLabel(QStringLiteral("No computers yet. Add them on the Computers page."),
-                                  QStringLiteral("emptyState")),
-                        0, 0);
-    }
-    const int columns = 6;
-    for (int i = 0; i < static_cast<int>(computers.size()); ++i) {
-        const Computer& c = computers[static_cast<std::size_t>(i)];
+    auto* header = new QHBoxLayout();
+    header->setSpacing(10);
+    auto* titles = new QVBoxLayout();
+    titles->setSpacing(2);
+    titles->addWidget(makeLabel(lab.location, QStringLiteral("sectionTitle")));
+    titles->addWidget(makeLabel(QStringLiteral("%1 computer(s)").arg(lab.total), QStringLiteral("caption")));
+    header->addLayout(titles, 1);
+    auto* view = makeButton(QStringLiteral("View computers"));
+    view->setToolTip(QStringLiteral("Open the Computers page filtered to this laboratory"));
+    const QString location = lab.location;
+    connect(view, &QPushButton::clicked, this, [this, location]() { emit openComputers(location); });
+    header->addWidget(view, 0, Qt::AlignTop);
+    layout->addLayout(header);
+
+    auto* chips = new QHBoxLayout();
+    chips->setSpacing(8);
+    chips->addWidget(makeStatusChip(ComputerStatus::Available, QStringLiteral("Available %1").arg(lab.available)));
+    chips->addWidget(makeStatusChip(ComputerStatus::Occupied, QStringLiteral("Occupied %1").arg(lab.occupied)));
+    chips->addWidget(
+        makeStatusChip(ComputerStatus::Maintenance, QStringLiteral("Maintenance %1").arg(lab.maintenance)));
+    chips->addStretch(1);
+    layout->addLayout(chips);
+
+    auto* occupancyRow = new QHBoxLayout();
+    occupancyRow->setSpacing(10);
+    auto* bar = new QProgressBar();
+    bar->setObjectName(QStringLiteral("occupancy"));
+    bar->setTextVisible(false);
+    bar->setRange(0, qMax(1, lab.total));
+    bar->setValue(lab.occupied);
+    occupancyRow->addWidget(bar, 1);
+    occupancyRow->addWidget(
+        makeLabel(QStringLiteral("%1 occupied").arg(percent(lab.occupied, lab.total)), QStringLiteral("caption")));
+    layout->addLayout(occupancyRow);
+
+    // Computer tiles wrap to the card width with equal spacing.
+    auto* tiles = new QWidget();
+    auto* flow = new FlowLayout(tiles, 0, 8, 8);
+    for (const Computer& c : computers) {
         const auto colors = theme::statusColors(c.status);
-        auto* tile = new QLabel(QStringLiteral("<b>%1</b><br><span style='font-size:8.5pt'>%2</span>")
-                                    .arg(c.computerId.toHtmlEscaped(), c.status.toHtmlEscaped()));
+        auto* tile = new QLabel(QStringLiteral("<b>%1</b><br>%2")
+                                    .arg(c.computerId.toHtmlEscaped(), c.status.left(1) + c.status.mid(1).toLower()));
         tile->setTextFormat(Qt::RichText);
         tile->setAlignment(Qt::AlignCenter);
-        tile->setMinimumSize(104, 50);
-        tile->setStyleSheet(QStringLiteral("background:%1; color:%2; border-radius:6px; padding:4px;")
+        tile->setFixedSize(96, 46);
+        tile->setStyleSheet(QStringLiteral("background:%1; color:%2; border-radius:6px; font-size:8.5pt;")
                                 .arg(colors.background.name(), colors.foreground.name()));
         QString tip = QStringLiteral("%1\n%2\n%3").arg(c.name, c.location, c.status);
         if (usedBy.contains(c.computerId))
             tip += QStringLiteral("\nIn use by ") + usedBy.value(c.computerId);
         tile->setToolTip(tip);
-        grid->addWidget(tile, i / columns, i % columns);
+        flow->addWidget(tile);
     }
-    grid->setRowStretch(grid->rowCount(), 1);
-    grid->setColumnStretch(columns, 1);
-    m_floorScroll->setWidget(body);  // deletes the previous body widget
+    layout->addWidget(tiles);
+    layout->addStretch(1);
+    return card;
+}
+
+void DashboardPage::refreshLabs(const QHash<QString, QString>& usedBy)
+{
+    std::vector<LabSummary> labs;
+    QString error;
+    if (!m_services.computers.labSummaries(labs, &error)) {
+        m_labs->setWidgets({});
+        m_labs->hide();
+        showErrorState(m_labsState, error);
+        return;
+    }
+    if (labs.empty()) {
+        m_labs->setWidgets({});
+        m_labs->hide();
+        showEmptyState(m_labsState, QStringLiteral("No laboratories yet. Add computers on the Computers page; each "
+                                                   "distinct location becomes a laboratory here."));
+        return;
+    }
+    QString listError;
+    QMap<QString, QList<Computer>> byLocation;
+    for (const Computer& c : m_services.computers.listComputers(QString(), &listError))
+        byLocation[c.location].append(c);
+    QList<QWidget*> cards;
+    for (const LabSummary& lab : labs)
+        cards.append(makeLabCard(lab, byLocation.value(lab.location), usedBy));
+    m_labs->setWidgets(cards);
+    m_labs->show();
+    if (!listError.isEmpty())
+        showErrorState(m_labsState, QStringLiteral("Computer tiles could not be loaded: ") + listError);
+    else
+        m_labsState->hide();
+}
+
+void DashboardPage::refreshActiveSessions()
+{
+    QString error;
+    const auto active = m_services.sessions.listSessions(true, 500, &error);
+    if (!error.isEmpty()) {
+        m_activeTable->setRowCount(0);
+        m_activeTable->hide();
+        showErrorState(m_activeState, error);
+        return;
+    }
+    m_activeTable->setRowCount(static_cast<int>(active.size()));
+    for (int row = 0; row < static_cast<int>(active.size()); ++row) {
+        const SessionRecord& r = active[static_cast<std::size_t>(row)];
+        m_activeTable->setItem(row, 0, makeItem(QStringLiteral("%1 (%2)").arg(r.studentName, r.studentId)));
+        m_activeTable->setItem(row, 1, makeItem(r.computerId));
+        m_activeTable->setItem(row, 2, makeItem(r.location));
+        m_activeTable->setItem(row, 3, makeItem(timeutil::toDisplay(r.startTime)));
+        m_activeTable->setItem(row, 4, makeItem(timeutil::durationText(r.startTime)));
+    }
+    if (active.empty()) {
+        m_activeTable->hide();
+        showEmptyState(m_activeState, QStringLiteral("No active computer sessions. Students start one from the "
+                                                     "Student portal."));
+    } else {
+        m_activeTable->show();
+        m_activeState->hide();
+    }
 }
 
 }  // namespace labdesk::ui

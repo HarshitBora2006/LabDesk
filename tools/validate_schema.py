@@ -327,6 +327,53 @@ def main():
     check(not ok, "cannot report maintenance on an occupied computer")
     end_session(con, "S1")
 
+    print("Dashboard / lab summary / session lookup / workload SQL (milestone 1.1)")
+    con.execute("INSERT INTO computer (computer_id, computer_name, location) VALUES ('PC7','Dell 7','Lab B')")
+    allocate(con, "S2", "PC7")
+    dash = con.execute(
+        "SELECT (SELECT COUNT(DISTINCT location) FROM computer), (SELECT COUNT(*) FROM computer),"
+        " (SELECT COUNT(*) FROM computer WHERE status = 'AVAILABLE'),"
+        " (SELECT COUNT(*) FROM computer WHERE status = 'OCCUPIED'),"
+        " (SELECT COUNT(*) FROM computer WHERE status = 'MAINTENANCE'),"
+        " (SELECT COUNT(*) FROM session  WHERE status = 'ACTIVE'),"
+        " (SELECT COUNT(*) FROM student),"
+        " (SELECT COUNT(*) FROM maintenance WHERE status = 'OPEN')").fetchone()
+    check(dash[0] == 2, "dashboard: 2 laboratories (distinct locations)")
+    check(dash[1] == 3 and dash[3] == 1 and dash[5] == 1, "dashboard: 3 computers, 1 occupied, 1 active session")
+    labs = con.execute(
+        "SELECT location, COUNT(*),"
+        "       SUM(CASE WHEN status = 'AVAILABLE'   THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN status = 'OCCUPIED'    THEN 1 ELSE 0 END),"
+        "       SUM(CASE WHEN status = 'MAINTENANCE' THEN 1 ELSE 0 END) "
+        "FROM computer GROUP BY location ORDER BY location").fetchall()
+    check(labs == [("Lab A", 2, 2, 0, 0), ("Lab B", 1, 0, 1, 0)], f"lab summaries per location: {labs}")
+    check(sum(l[1] for l in labs) == dash[1], "lab totals add up to total computers")
+    session_select = (
+        "SELECT s.session_id, s.student_id, st.name, s.computer_id, c.computer_name, c.location,"
+        "       s.start_time, s.end_time, s.status "
+        "FROM session s JOIN student st ON st.student_id = s.student_id "
+        "JOIN computer c ON c.computer_id = s.computer_id ")
+    active_sid = con.execute("SELECT session_id FROM session WHERE status='ACTIVE'").fetchone()[0]
+    row = con.execute(session_select + "WHERE s.session_id = ?", (active_sid,)).fetchone()
+    check(row is not None and row[1] == "S2" and row[3] == "PC7" and row[5] == "Lab B", "findSession join row")
+    check(con.execute(session_select + "WHERE s.session_id = ?", (999999,)).fetchone() is None,
+          "findSession: unknown id returns no row")
+    # workloads are keyed by session (or NULL); 'IS ?' must keep them apart
+    con.execute("BEGIN IMMEDIATE")
+    con.execute("DELETE FROM process WHERE session_id IS ?", (active_sid,))
+    for label, at, bt, pr in [("A1", 0, 5, 1), ("A2", 2, 3, 0)]:
+        con.execute("INSERT INTO process (session_id, label, arrival_time, burst_time, priority) VALUES (?,?,?,?,?)",
+                    (active_sid, label, at, bt, pr))
+    con.execute("COMMIT")
+    con.execute("INSERT INTO process (session_id, label, arrival_time, burst_time, priority) VALUES (NULL,'D1',0,1,0)")
+    linked = con.execute("SELECT label FROM process WHERE session_id IS ? ORDER BY process_id", (active_sid,)).fetchall()
+    unlinked = con.execute("SELECT label FROM process WHERE session_id IS ? ORDER BY process_id", (None,)).fetchall()
+    check(linked == [("A1",), ("A2",)], "workload for the session loads only its own processes, in saved order")
+    check(unlinked == [("D1",)], "unlinked demo workload kept separate")
+    sizes = dict(con.execute("SELECT IFNULL(session_id, -1), COUNT(*) FROM process GROUP BY session_id").fetchall())
+    check(sizes == {-1: 1, active_sid: 2}, f"workload sizes per session ({sizes})")
+    end_session(con, "S2")
+
     print("Consistency invariant")
     bad = count(con, """
         SELECT COUNT(*) FROM computer c
