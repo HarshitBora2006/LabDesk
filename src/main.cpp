@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("LabDesk"));
     QApplication::setOrganizationName(QStringLiteral("LabDesk"));
-    QApplication::setApplicationVersion(QStringLiteral("0.6.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.7.3"));
     QApplication::setStyle(QStringLiteral("Fusion"));
 
     QFont font = QApplication::font();

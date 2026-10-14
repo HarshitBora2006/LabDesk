@@ -1,5 +1,6 @@
 #include "dashboardpage.h"
 
+#include "labqueue.h"
 #include "layouthelpers.h"
 #include "services.h"
 #include "theme.h"
@@ -45,6 +46,7 @@ DashboardPage::DashboardPage(Services& services, QWidget* parent) : Page(parent)
                          makeStat(QStringLiteral("occupied"), QStringLiteral("Occupied")),
                          makeStat(QStringLiteral("maintenance"), QStringLiteral("Under maintenance")),
                          makeStat(QStringLiteral("sessions"), QStringLiteral("Active sessions")),
+                         makeStat(QStringLiteral("queue"), QStringLiteral("Waiting in queue")),
                          makeStat(QStringLiteral("occupancy"), QStringLiteral("Lab occupancy"))});
     root->addWidget(m_stats);
 
@@ -131,6 +133,8 @@ void DashboardPage::refresh()
                 QStringLiteral("%1 open issue(s)").arg(s.openMaintenance));
         setStat(QStringLiteral("sessions"), QString::number(s.activeSessions),
                 QStringLiteral("%1 student(s) registered").arg(s.students));
+        setStat(QStringLiteral("queue"), QString::number(s.waitingRequests),
+                QStringLiteral("policy: %1").arg(QString::fromLatin1(lab::policyCode(m_services.queue.policy()))));
         setStat(QStringLiteral("occupancy"), percent(s.occupied, s.totalComputers),
                 QStringLiteral("%1 of %2 computers in use").arg(s.occupied).arg(s.totalComputers));
     }

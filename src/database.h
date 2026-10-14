@@ -38,7 +38,7 @@ public:
     QString connectionName() const { return m_connectionName; }
 
     static QString defaultFilePath();
-    static constexpr int kSchemaVersion = 1;
+    static constexpr int kSchemaVersion = 2;
 
 private:
     bool applySchema(QString* error);

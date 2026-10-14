@@ -27,9 +27,13 @@ namespace labdesk::os {
 
 inline constexpr int kMinPriority = 0;
 inline constexpr int kMaxPriority = 99;
-inline constexpr int kMaxArrival = 100000;
-inline constexpr int kMaxBurst = 10000;
-inline constexpr int kMaxQuantum = 10000;
+// Limits allow second-level real data (measured lab visits): up to one year of
+// arrivals and one day per burst, in whatever time unit the workload uses.
+inline constexpr int kMaxArrival = 31'536'000;
+inline constexpr int kMaxBurst = 86'400;
+inline constexpr int kMaxQuantum = 86'400;
+// Round Robin safety limit: total burst / quantum may not exceed this many slices.
+inline constexpr long long kMaxRoundRobinSlices = 50'000;
 inline constexpr std::size_t kMaxProcesses = 100;
 
 enum class Algorithm { FCFS, SJF, SRTF, Priority, RoundRobin };

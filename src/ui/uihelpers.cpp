@@ -106,6 +106,14 @@ QVariant selectedRowData(const QTableWidget* table, int column)
     return item ? item->data(Qt::UserRole) : QVariant();
 }
 
+void alignNumericColumns(QTableWidget* table, std::initializer_list<int> columns)
+{
+    for (int c : columns) {
+        if (QTableWidgetItem* header = table->horizontalHeaderItem(c))
+            header->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    }
+}
+
 QVBoxLayout* makePageLayout(QWidget* page, const QString& title, const QString& subtitle)
 {
     page->setObjectName(QStringLiteral("pageRoot"));

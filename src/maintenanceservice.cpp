@@ -1,9 +1,11 @@
 #include "maintenanceservice.h"
 
 #include "database.h"
+#include "queueservice.h"
 #include "timeutil.h"
 
 #include <QSqlQuery>
+#include <QStringList>
 #include <QVariant>
 
 namespace labdesk {
@@ -180,6 +182,13 @@ OpResult MaintenanceService::resolveIssue(qint64 maintenanceId) const
         outcome = q.numRowsAffected() == 1
                       ? QStringLiteral("%1 is AVAILABLE again.").arg(computerId)
                       : QStringLiteral("%1 was not in MAINTENANCE; status unchanged.").arg(computerId);
+        // Same transaction: a waiting student gets the repaired computer.
+        QStringList assignments;
+        QString dispatchError;
+        if (!QueueService::dispatchWithin(db, &assignments, &dispatchError))
+            return OpResult::failure(QStringLiteral("Could not assign the computer to the lab queue: ") + dispatchError);
+        if (!assignments.isEmpty())
+            outcome += QStringLiteral(" ") + assignments.join(QStringLiteral("; ")) + QStringLiteral(".");
     } else {
         outcome = QStringLiteral("%1 stays in MAINTENANCE: %2 other open issue(s).").arg(computerId).arg(openIssues);
     }

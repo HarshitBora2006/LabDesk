@@ -1,5 +1,9 @@
 -- =====================================================================
--- LabDesk database schema (schema version 1)
+-- LabDesk database schema (schema version 2)
+--
+-- Version 2 (LabDesk 0.7.0) ADDS lab_setting and lab_request plus their
+-- indexes and triggers. Nothing existing is altered, so opening a version-1
+-- database simply creates the new tables; all existing rows are preserved.
 --
 -- Loader rule: statements are separated by a line containing only
 --     -- @@
@@ -151,4 +155,85 @@ BEFORE UPDATE OF status ON maintenance
 WHEN OLD.status = 'RESOLVED'
 BEGIN
     SELECT RAISE(ABORT, 'A resolved maintenance record cannot be reopened');
+END;
+
+-- @@
+-- =====================================================================
+-- Version 2: lab queue. A request records WHEN a student asked for a
+-- computer (arrival), why (purpose -> priority) and how long they expect to
+-- stay (needed by SJF). The linked session supplies start and end, so
+-- waiting time and actual burst are measured, never typed in.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS lab_setting (
+    setting_key TEXT NOT NULL PRIMARY KEY,
+    value       TEXT NOT NULL,
+    CHECK (setting_key <> 'queue_policy' OR value IN ('FCFS', 'SJF', 'PRIORITY'))
+);
+-- @@
+INSERT OR IGNORE INTO lab_setting (setting_key, value) VALUES ('queue_policy', 'FCFS');
+-- @@
+CREATE TABLE IF NOT EXISTS lab_request (
+    request_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id       TEXT NOT NULL
+                     REFERENCES student (student_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    purpose          TEXT NOT NULL CHECK (purpose IN ('EXAM', 'ASSIGNMENT', 'PRACTICE')),
+    priority         INTEGER NOT NULL,
+    expected_minutes INTEGER NOT NULL
+                     CHECK (typeof(expected_minutes) = 'integer' AND expected_minutes BETWEEN 5 AND 480),
+    requested_at     TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*Z'),
+    status           TEXT NOT NULL DEFAULT 'WAITING' CHECK (status IN ('WAITING', 'ALLOCATED', 'CANCELLED')),
+    session_id       INTEGER UNIQUE
+                     REFERENCES session (session_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    allocated_at     TEXT CHECK (allocated_at IS NULL OR allocated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*Z'),
+    cancelled_at     TEXT CHECK (cancelled_at IS NULL OR cancelled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*Z'),
+    granted_by       TEXT CHECK (granted_by IS NULL OR granted_by IN ('IMMEDIATE', 'FCFS', 'SJF', 'PRIORITY')),
+    -- priority is derived from purpose and must agree with it (lower = higher priority)
+    CHECK (priority = CASE purpose WHEN 'EXAM' THEN 1 WHEN 'ASSIGNMENT' THEN 2 ELSE 3 END),
+    CHECK ((status = 'WAITING'   AND session_id IS NULL     AND allocated_at IS NULL     AND cancelled_at IS NULL     AND granted_by IS NULL)
+        OR (status = 'ALLOCATED' AND session_id IS NOT NULL AND allocated_at IS NOT NULL AND cancelled_at IS NULL     AND granted_by IS NOT NULL)
+        OR (status = 'CANCELLED' AND session_id IS NULL     AND allocated_at IS NULL     AND cancelled_at IS NOT NULL AND granted_by IS NULL)),
+    CHECK (allocated_at IS NULL OR allocated_at >= requested_at),
+    CHECK (cancelled_at IS NULL OR cancelled_at >= requested_at)
+);
+-- @@
+CREATE UNIQUE INDEX IF NOT EXISTS ux_request_one_waiting_per_student
+    ON lab_request (student_id) WHERE status = 'WAITING';
+-- @@
+CREATE INDEX IF NOT EXISTS ix_request_status ON lab_request (status, requested_at);
+-- @@
+CREATE TRIGGER IF NOT EXISTS trg_request_not_while_in_session
+BEFORE INSERT ON lab_request
+WHEN NEW.status = 'WAITING'
+ AND EXISTS (SELECT 1 FROM session WHERE student_id = NEW.student_id AND status = 'ACTIVE')
+BEGIN
+    SELECT RAISE(ABORT, 'Student already has an active session and cannot join the queue');
+END;
+-- @@
+CREATE TRIGGER IF NOT EXISTS trg_request_session_belongs_to_student_insert
+BEFORE INSERT ON lab_request
+WHEN NEW.session_id IS NOT NULL
+ AND (SELECT student_id FROM session WHERE session_id = NEW.session_id) IS NOT NEW.student_id
+BEGIN
+    SELECT RAISE(ABORT, 'A request can only be linked to a session of the same student');
+END;
+-- @@
+CREATE TRIGGER IF NOT EXISTS trg_request_session_belongs_to_student_update
+BEFORE UPDATE OF session_id ON lab_request
+WHEN NEW.session_id IS NOT NULL
+ AND (SELECT student_id FROM session WHERE session_id = NEW.session_id) IS NOT NEW.student_id
+BEGIN
+    SELECT RAISE(ABORT, 'A request can only be linked to a session of the same student');
+END;
+-- @@
+CREATE TRIGGER IF NOT EXISTS trg_request_history_is_final
+BEFORE UPDATE ON lab_request
+WHEN OLD.status IN ('ALLOCATED', 'CANCELLED')
+BEGIN
+    SELECT RAISE(ABORT, 'Allocated or cancelled requests are measurement history and cannot be modified');
+END;
+-- @@
+CREATE TRIGGER IF NOT EXISTS trg_request_history_not_deletable
+BEFORE DELETE ON lab_request
+BEGIN
+    SELECT RAISE(ABORT, 'Request history cannot be deleted');
 END;

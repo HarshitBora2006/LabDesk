@@ -118,6 +118,7 @@ QWidget* ProcessStatePage::buildSimulatorTab()
     setupTable(m_processes, {QStringLiteral("Process ID"), QStringLiteral("Current state"),
                              QStringLiteral("Transitions")});
     m_processes->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    alignNumericColumns(m_processes, {2});
     m_processes->setMinimumHeight(170);
     left->addWidget(m_processes, 1);
     m_processesState = makeStateMessage();
@@ -169,6 +170,7 @@ QWidget* ProcessStatePage::buildSimulatorTab()
     setupTable(m_events, {QStringLiteral("Tick"), QStringLiteral("Process ID"), QStringLiteral("Action"),
                           QStringLiteral("Previous state"), QStringLiteral("New state")});
     m_events->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    alignNumericColumns(m_events, {0});
     m_events->setMinimumHeight(180);
     layout->addWidget(m_events);
     m_eventsState = makeStateMessage();
@@ -228,6 +230,7 @@ QWidget* ProcessStatePage::buildTraceTab()
     m_traceEvents = new QTableWidget();
     setupTable(m_traceEvents, {QStringLiteral("Time"), QStringLiteral("Process ID"), QStringLiteral("Previous state"),
                                QStringLiteral("New state"), QStringLiteral("Reason")});
+    alignNumericColumns(m_traceEvents, {0});
     tables->addWidget(m_traceEvents, 3);
     layout->addLayout(tables, 1);
     tab->setMinimumHeight(420);

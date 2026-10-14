@@ -7,6 +7,8 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <initializer_list>
+
 class QFrame;
 class QPushButton;
 class QTableWidget;
@@ -29,6 +31,9 @@ QTableWidgetItem* makeStatusItem(const QString& status);
 QTableWidgetItem* makeNumberItem(double value, int decimals = 0);
 // Data stored with makeItem(..., userData) in column `column` of the selected row.
 QVariant selectedRowData(const QTableWidget* table, int column = 0);
+// Right-aligns the header of numeric columns so each heading sits above its
+// right-aligned numbers (makeNumberItem). Call after the headers are set.
+void alignNumericColumns(QTableWidget* table, std::initializer_list<int> columns);
 
 // Page skeleton: title + subtitle, returns the layout to add content to.
 QVBoxLayout* makePageLayout(QWidget* page, const QString& title, const QString& subtitle);

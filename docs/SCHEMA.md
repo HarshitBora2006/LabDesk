@@ -1,10 +1,18 @@
-# LabDesk database schema (version 1)
+# LabDesk database schema (version 2)
 
 The single source of truth is [`resources/sql/schema.sql`](../resources/sql/schema.sql).
 It is embedded in the application and applied on every start: all statements
 use `IF NOT EXISTS`, so applying the schema again is a no-op. The version is
 stored in `PRAGMA user_version` (currently 1).
 
+> **Version 2 (LabDesk 0.7.0)** adds `lab_setting` and `lab_request` (see
+> [Lab queue tables](#lab-queue-tables-version-2)). The migration is purely
+> additive: on start-up `Database::open()` runs every `CREATE … IF NOT
+> EXISTS` statement, so a version-1 database gains the two tables, their
+> indexes, triggers and the default policy row, and nothing existing is
+> altered. `PRAGMA user_version` becomes 2. The validator tests this on a real
+> version-1 file.
+>
 > Version 0.6.0 made **no schema change**. The dashboard derives
 > "laboratories" from distinct `computer.location` values (`GROUP BY
 > location`). The CPU scheduling page uses the existing `process` table: rows
@@ -21,6 +29,8 @@ erDiagram
     COMPUTER ||--o{ SESSION     : "hosts (0..n)"
     COMPUTER ||--o{ MAINTENANCE : "has issues (0..n)"
     SESSION  |o--o{ PROCESS     : "owns workload (optional)"
+    STUDENT  ||--o{ LAB_REQUEST : "requests a computer"
+    SESSION  |o--o| LAB_REQUEST : "fulfils (0..1)"
 
     STUDENT {
         TEXT student_id PK
@@ -50,6 +60,19 @@ erDiagram
         TEXT reported_at
         TEXT resolved_at "NULL while OPEN"
         TEXT status "OPEN | RESOLVED"
+    }
+    LAB_REQUEST {
+        INTEGER request_id PK "AUTOINCREMENT"
+        TEXT student_id FK
+        TEXT purpose "EXAM | ASSIGNMENT | PRACTICE"
+        INTEGER priority "1 | 2 | 3, derived from purpose"
+        INTEGER expected_minutes "5..480"
+        TEXT requested_at "arrival, UTC ISO-8601"
+        TEXT status "WAITING | ALLOCATED | CANCELLED"
+        INTEGER session_id FK "UNIQUE, NULL until allocated"
+        TEXT allocated_at
+        TEXT cancelled_at
+        TEXT granted_by "IMMEDIATE | FCFS | SJF | PRIORITY"
     }
     PROCESS {
         INTEGER process_id PK "AUTOINCREMENT"
@@ -131,6 +154,47 @@ Table-level checks on `session`:
 process names the user typed. `ON DELETE SET NULL` is defensive only: session
 rows cannot be deleted (see triggers).
 
+## Lab queue tables (version 2)
+
+### `lab_setting`
+
+A key/value table; `queue_policy` must be `FCFS`, `SJF` or `PRIORITY`
+(enforced by CHECK). The schema inserts `FCFS` with `INSERT OR IGNORE`, so an
+administrator's choice is never overwritten on restart.
+
+### `lab_request`
+
+One row per request for a computer. The row records the **arrival time**.
+Once allocated, it points at the session that supplies **start** and **end**,
+from which waiting time and the **actual burst** are derived. No timing value
+is ever typed in.
+
+| Column | Constraints |
+|---|---|
+| `request_id` | **PK AUTOINCREMENT** |
+| `student_id` | **FK → student** `ON DELETE RESTRICT` |
+| `purpose` | `CHECK IN ('EXAM','ASSIGNMENT','PRACTICE')` |
+| `priority` | `CHECK (priority = CASE purpose WHEN 'EXAM' THEN 1 WHEN 'ASSIGNMENT' THEN 2 ELSE 3 END)` |
+| `expected_minutes` | integer, 5–480 |
+| `requested_at` | `NOT NULL`, ISO-8601 UTC |
+| `status` | `WAITING`, `ALLOCATED` or `CANCELLED` |
+| `session_id` | **UNIQUE FK → session**, NULL until allocated |
+| `allocated_at`, `cancelled_at` | ISO-8601 UTC, each `>= requested_at` |
+| `granted_by` | `IMMEDIATE` (a computer was free) or the policy that chose the student |
+
+A table-level CHECK ties these together: a WAITING row has no session and no
+allocation or cancel time; an ALLOCATED row has a session, an allocation time
+and `granted_by`; a CANCELLED row has only a cancel time.
+
+| Index / trigger | Rule |
+|---|---|
+| `ux_request_one_waiting_per_student` (partial UNIQUE) | At most one WAITING request per student |
+| `ix_request_status` | Fast queue look-ups |
+| `trg_request_not_while_in_session` | A student with an ACTIVE session cannot join the queue |
+| `trg_request_session_belongs_to_student_insert` / `_update` | A request can only be linked to its own student's session |
+| `trg_request_history_is_final` | ALLOCATED or CANCELLED requests cannot change (measurement history) |
+| `trg_request_history_not_deletable` | Requests cannot be deleted |
+
 ## Indexes
 
 | Index | Purpose |
@@ -170,7 +234,9 @@ every refresh (`ComputerService::consistencyProblems`):
    it.
 3. `computer.status = 'AVAILABLE'` ⇒ no active session and no open issue.
 4. Each student has at most one active session.
-5. Session and maintenance history is append-only.
+5. Session, maintenance and request history is append-only.
+6. A computer is AVAILABLE only if nobody is waiting: every action that frees
+   a computer serves the queue in the same transaction.
 
 ## Transactional workflows
 
@@ -217,6 +283,31 @@ UPDATE computer to MAINTENANCE if it was AVAILABLE; COMMIT
 ```
 BEGIN; UPDATE maintenance to RESOLVED; count the remaining OPEN issues
 and ACTIVE sessions; UPDATE computer to AVAILABLE only if both are 0; COMMIT
+```
+
+**Join the queue / start now** (`QueueService::joinQueue`, `startNow`):
+
+```
+BEGIN IMMEDIATE
+  check: student exists, has no ACTIVE session, has no WAITING request
+  count WAITING requests
+  if a computer is free and nobody waits:
+      UPDATE computer -> OCCUPIED; INSERT session (start = now)
+      INSERT lab_request (..., status 'ALLOCATED', requested_at = allocated_at = now, granted_by 'IMMEDIATE')
+  else:
+      INSERT lab_request (..., status 'WAITING', requested_at = now)
+COMMIT
+```
+
+**Hand-over** (`QueueService::dispatchWithin`). This runs *inside* the
+transaction of `endSession`, `resolveIssue` and `addComputer`:
+
+```
+while an AVAILABLE computer exists and a WAITING request exists:
+    choose the next request by the policy (labqueue.cpp: FCFS / SJF / PRIORITY)
+    UPDATE computer -> OCCUPIED; INSERT session (start = now)
+    UPDATE lab_request SET status 'ALLOCATED', session_id, allocated_at = now, granted_by = policy
+-- any failure: the caller's whole transaction (e.g. the session end) rolls back
 ```
 
 **Save a scheduler workload**:

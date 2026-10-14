@@ -99,6 +99,17 @@ ScheduleResult Scheduler::run(Algorithm algorithm, const std::vector<Process>& p
         const std::string qProblem = validateQuantum(quantum);
         if (!qProblem.empty())
             throw std::invalid_argument(qProblem);
+        long long totalBurst = 0;
+        for (const Process& p : processes)
+            totalBurst += p.burst;
+        const long long slices = (totalBurst + quantum - 1) / quantum;
+        if (slices > kMaxRoundRobinSlices) {
+            const long long minimum = (totalBurst + kMaxRoundRobinSlices - 1) / kMaxRoundRobinSlices;
+            throw std::invalid_argument("A time quantum of " + std::to_string(quantum) + " would cut this workload "
+                                        "into about " + std::to_string(slices) + " slices (limit "
+                                        + std::to_string(kMaxRoundRobinSlices) + "). Use a quantum of at least "
+                                        + std::to_string(minimum) + ".");
+        }
         return runRoundRobin(processes, quantum);
     }
     if (algorithm == Algorithm::SRTF)

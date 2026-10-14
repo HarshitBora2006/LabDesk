@@ -8,18 +8,25 @@ sign in, take an available computer and end their session. A separate module
 simulates CPU scheduling (FCFS, SJF, Priority, Round Robin) and the process
 lifecycle.
 
-> **Build status, read this first (version 0.6.0).** Version 0.5.0 built and
-> ran on Windows, and its `database_tests` passed 59 / 59. Version 0.6.0
-> changes the GUI, adds SRTF, and adds three read-only service methods. The
-> scheduling engine and every SQL statement were compiled/executed and tested
-> by the author. The Qt application and `database_tests` (now 72 checks) were
-> **not compiled by the author**, because the authoring sandbox has no Qt or
-> CMake. Build it and run `ctest` first; see [Testing status](#testing-status).
+> **Build status, read this first (version 0.7.3).** Version 0.7.1 was built
+> and run by the user on Windows with Qt 6.12 / MinGW (screenshots of the Lab
+> queue and CPU scheduling pages). 0.7.2–0.7.3 make measured lab data both
+> honest and readable: a Minutes / Seconds unit choice for the measured CPU
+> scheduling workload (minutes by default) with a distortion warning, and
+> m:ss durations on the Lab queue page. The
+> author compiled and ran everything that does not need Qt:
+> `scheduler_tests` 204 / 204, `labqueue_tests` 49 / 49 and the SQL validator
+> 91 / 91. The Qt changes in 0.7.2–0.7.3 and `database_tests` (98 checks) have **not
+> been compiled by the author**; rebuild and run `ctest`.
 
 ---
 
 ## Contents
 
+1. [What changed in 0.7.3](#what-changed-in-073)
+1. [What changed in 0.7.2](#what-changed-in-072)
+1. [What changed in 0.7.1](#what-changed-in-071)
+1. [What changed in 0.7.0: lab queue with real data](#what-changed-in-070-lab-queue-with-real-data)
 1. [What changed in 0.6.0](#what-changed-in-060)
 1. [Technology stack](#technology-stack)
 2. [Building and running](#building-and-running)
@@ -34,6 +41,119 @@ lifecycle.
 
 Further documents: [`docs/SCHEMA.md`](docs/SCHEMA.md) (database design) and
 [`docs/TESTING.md`](docs/TESTING.md) (automated tests and manual test guide).
+
+---
+
+## What changed in 0.7.3
+
+Real lab sessions last minutes or hours, so seconds produce large numbers
+(a 2-hour session is burst 7200). The measured workload therefore has a
+**Time unit** selector:
+
+* **Minutes (default).** Rounded to the nearest minute, so a value is off by
+  at most 30 s. A 1-hour session is 60 and a 2-hour session is 120, with
+  under 1 % error.
+* **Seconds.** Exact, for very short test visits.
+
+When minutes are chosen and rounding changes any visit's length by more than
+10 % (typical for quick test visits), the page shows a Warning with the count
+and suggests Seconds. When nothing is distorted, the Note says so. The column
+headings, the quantum label and the result text always name the unit in use.
+
+## What changed in 0.7.2
+
+0.7.1 converted measured visits to **whole minutes**. That distorted short
+visits: a 4-second visit became a 1-minute burst, and 2 min 27 s became 2.
+Real data must not be inflated, so:
+
+* **CPU scheduling → "Measured lab visits" now uses seconds** (0.7.3 adds a
+  Minutes / Seconds choice, with minutes as the default). A visit of
+  2 min 27 s has burst 147, a 4-second visit has burst 4, and a request
+  18 min 30 s after the first has arrival 1110. Values are rounded only to the
+  nearest second, and a sub-second visit counts as 1 s. The column headings
+  read "Arrival time (s)" and "Burst time (s)", the quantum label says
+  "in seconds", and the result text states that all times are in seconds.
+* The engine limits were raised so real second-level data fits: arrival up to
+  31 536 000 (one year of seconds), and burst and quantum up to 86 400 (one
+  day). Round Robin refuses a quantum that would cut the workload into more
+  than 50 000 slices and says which minimum quantum to use (e.g. 60 s).
+* **Lab queue page:** durations are shown exactly as m:ss (or h:mm:ss), e.g.
+  `0:04`, `2:27`, `18:30`, instead of decimal minutes such as "0.1". This
+  applies to the tiles, the measured table, the waiting list and the replay
+  table.
+
+## What changed in 0.7.1
+
+* **CPU scheduling → Workload → "Measured lab visits".** Every finished lab
+  visit becomes one process, read straight from the database: Process ID =
+  `R` + request number, arrival = minutes after the first request, burst =
+  the **actual** session length (whole minutes in 0.7.1, **seconds since
+  0.7.2**), and priority =
+  purpose. The Source column marks each row "Measured, request #n (student)".
+  * The rows are read-only. *Save* is disabled, edited rows are marked
+    "edited", and *Revert to saved* reloads the real data.
+  * The table refreshes automatically when another visit finishes.
+  * It is simulated as **one computer**. SJF and SRTF therefore know the real
+    lengths in advance, which a real lab cannot; for several computers and
+    estimate-based SJF, use Lab queue → What-if replay. Up to the 100 most
+    recent visits are loaded (the engine's limit).
+* **Lab queue.** The tile is now "Avg estimate error, absolute (min)". The
+  per-row error keeps its sign (negative = shorter than expected), and the
+  caption explains why the average uses the size of each error. Units have
+  moved into the column headings.
+* **Numeric columns.** Headings of number columns are right-aligned, so each
+  heading sits above its numbers. This applies to the CPU scheduling results
+  and comparison tables, the Lab queue tables, the replay table and the
+  process-state tables.
+
+---
+
+## What changed in 0.7.0: lab queue with real data
+
+Students no longer pick a computer anonymously. Every visit starts with a
+**request** stating its purpose and expected length, and the timings are
+recorded by the database as they happen:
+
+| Value | Recorded when | Source |
+|---|---|---|
+| Arrival time | the student presses *Start session* or *Join the waiting queue* | `lab_request.requested_at` |
+| Priority | at the request, from the purpose: exam 1, assignment 2, practice 3 | `lab_request.priority` (a CHECK keeps it consistent with `purpose`) |
+| Expected length | at the request, typed by the student (5–480 min) | `lab_request.expected_minutes`; SJF decides with this estimate |
+| Start | a computer is assigned (at once, or later from the queue) | `session.start_time` = `lab_request.allocated_at` |
+| **Burst** (actual length) | the session ends | `session.end_time − session.start_time`; measured, never typed in |
+| Waiting time | derived | start − arrival (0 when a computer was free) |
+| Turnaround | derived | end − arrival |
+
+How the queue works:
+
+* If no computer is free (or others are already waiting), the student joins
+  the queue.
+* Whenever a computer becomes free, the database transaction that freed it
+  also assigns it to the next waiting student, chosen by the administrator's
+  policy: **FCFS**, **SJF** (by expected length) or **Priority** (by
+  purpose). A computer becomes free when a session ends, a repair is resolved
+  or a computer is added. If the hand-over fails, the whole transaction rolls
+  back.
+* All policies are non-preemptive, because sessions are never interrupted.
+
+The new **Lab queue** page (Administration) shows:
+
+* the policy selector;
+* waiting students in the order they will be served;
+* measured results per visit and their averages (waiting, actual burst,
+  turnaround, longest wait, estimate error);
+* a **what-if replay** that re-runs the recorded visits under all three
+  policies on N computers.
+
+In a report, describe this as an *application* of CPU-scheduling ideas to the
+lab: students are jobs and computers are processors. It is not CPU scheduling
+inside a computer; the CPU scheduling page remains the simulator for that.
+
+Schema version 2 only **adds** `lab_setting` and `lab_request` (plus indexes
+and triggers). Opening a 0.5 / 0.6 database migrates it automatically and
+keeps all existing data. Sessions created before 0.7, or through the admin
+transaction demonstration, have no request and therefore no arrival time;
+they are excluded from the measured results.
 
 ---
 
@@ -98,10 +218,10 @@ On macOS the executable is `build/labdesk.app/Contents/MacOS/labdesk`.
    e.g. `C:\Projects\LabDesk`.
 3. In Qt Creator choose **File → Open File or Project…** and select
    `CMakeLists.txt`. Pick your Qt 6 kit and press **Configure Project**.
-4. Build with **Ctrl+B**. Three targets are built: `labdesk`,
-   `scheduler_tests` and `database_tests`.
+4. Build with **Ctrl+B**. Four targets are built: `labdesk`,
+   `scheduler_tests`, `labqueue_tests` and `database_tests`.
 5. Run: choose the `labdesk` run target and press **Ctrl+R**.
-6. Test: run `scheduler_tests` and `database_tests` as run targets (each
+6. Test: run `scheduler_tests`, `labqueue_tests` and `database_tests` as run targets (each
    prints every check and ends with `N passed, 0 failed`), or run `ctest` in
    the build folder from a Qt command prompt (below). Qt Creator can also list
    them under **Tools → Tests** once CTest is enabled in *Preferences →
@@ -195,6 +315,9 @@ The administrator screens have no login in this milestone (see limitations).
   an AVAILABLE computer moves to MAINTENANCE. Edit descriptions and view the
   history. Resolving an issue releases the computer only if no other open
   issue and no active session remain.
+* **Lab queue.** Policy selector, live waiting list in dispatch order (with
+  *Remove selected request*), measured results and the what-if replay. See
+  [What changed in 0.7.0](#what-changed-in-070-lab-queue-with-real-data).
 * **Sessions and transactions.** Full session history, plus an admin
   "end selected session" action. The **transaction demonstration** tab runs
   the real service code, prints every SQL step with COMMIT or ROLLBACK, shows
@@ -204,12 +327,18 @@ The administrator screens have no login in this milestone (see limitations).
 
 * Sign in with student ID and password, checked against the salted hash
   stored in `student`. Nothing else is reachable before sign-in.
+* **Request a computer**: choose a purpose (sets the priority) and an expected
+  length, then either start on a free computer (waiting 0) or join the waiting
+  queue. While waiting, the page shows the student's live position under the
+  current policy, the time waited so far and a *Leave queue* button.
 * The dashboard shows name, ID, department, the current session (computer,
   location, start time, live elapsed time) and the table of AVAILABLE
   computers.
-* **Use selected computer** runs the allocation transaction, which rechecks
-  availability inside the transaction. **End session** runs the termination
-  transaction. Every change refreshes all screens from the database.
+* **Start session on selected computer** writes the request and the session
+  in one transaction, rechecking availability, the queue and the
+  one-session rule inside it. **End session** runs the termination
+  transaction, which also hands the computer to the next waiting student.
+  Every change refreshes all screens from the database.
 
 ### Operating systems
 
@@ -256,7 +385,9 @@ The administrator screens have no login in this milestone (see limitations).
 | **Referential integrity** | Foreign keys with `ON DELETE RESTRICT`. `PRAGMA foreign_keys = ON` is set on every connection and **read back** to verify | TEST 9 (raw `DELETE` fails with `FOREIGN KEY constraint failed`) |
 | **Prepared statements** | Every query that takes input uses `prepare()` and `addBindValue()` | All `*service.cpp` files |
 | **Constraints** | `NOT NULL`, `UNIQUE` (case-insensitive email), `CHECK` (status values, timestamp format, non-negative times, priority 0 to 99, end ≥ start) | `resources/sql/schema.sql` |
-| **Business rules in the DB** | Partial unique indexes (one ACTIVE session per computer and per student) and 8 triggers | `tools/validate_schema.py`, section "Database-level guards" |
+| **Business rules in the DB** | Partial unique indexes (one ACTIVE session per computer and per student; one WAITING request per student) and 13 triggers | `tools/validate_schema.py`, sections "Database-level guards" and "Lab queue" |
+| **Multi-step atomicity** | Ending a session, releasing the computer and assigning it to the next waiting student happen in ONE transaction (`SessionService::endSession` → `QueueService::dispatchWithin`) | Validator: an injected failure in the hand-over leaves the old session ACTIVE and the queue unchanged |
+| **Schema migration** | Schema v2 is additive (`CREATE … IF NOT EXISTS`); `PRAGMA user_version` 1 → 2 | Validator: a real version-1 database keeps its sessions and gains the new tables |
 
 Why have both service checks **and** database constraints? Service checks
 produce clear messages for users. The database constraints still hold if code
@@ -332,7 +463,9 @@ src/
   processservice.*         atomic save/load of scheduler workloads
   services.h               bundles the services for the GUI
   passwordhasher.*, timeutil.*
-  scheduler.h/.cpp         FCFS, SJF, Priority, RR (pure C++17, no Qt)
+  scheduler.h/.cpp         FCFS, SJF, SRTF, Priority, RR (pure C++17, no Qt)
+  labqueue.h/.cpp          lab queue policies, measured metrics, what-if replay (pure C++17)
+  queueservice.*           requests, waiting queue, transactional dispatch
   processstate.h/.cpp      state machine + lifecycle simulator (pure C++17)
   mainwindow.h/.cpp        sidebar navigation, cross-page refresh
   ui/                      one class per page, plus theme (palette + stylesheet),
@@ -340,8 +473,9 @@ src/
                            (FlowLayout, ResponsiveGrid), Gantt chart and
                            state-diagram widgets
 tests/
-  scheduler_tests.cpp      204 checks, no Qt needed
-  database_tests.cpp       72 service-level integration checks (Qt Core + Sql)
+  scheduler_tests.cpp      208 checks, no Qt needed
+  labqueue_tests.cpp       49 checks, no Qt needed
+  database_tests.cpp       98 service-level integration checks (Qt Core + Sql)
 tools/
   validate_schema.py       Qt-independent SQL validator (Python 3, stdlib only)
 docs/
@@ -366,15 +500,17 @@ and student views on the same committed state.
 
 | Item | How | Status |
 |---|---|---|
-| Scheduling engine + process-state model (incl. SRTF, transition explanations) | `scheduler_tests` with g++ 13, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan | **204 / 204 passed** (author) |
-| Test strength | Mutation check: SRTF preemption deliberately disabled | Suite detected it (26 failures) |
-| Schema, constraints, triggers, all service SQL incl. new dashboard / lab / session-lookup / workload queries | `python3 tools/validate_schema.py` (SQLite 3.45) | **62 / 62 passed** (author) |
-| Source consistency | Script checks: every member, service method and helper used is declared; every declared method defined; every file in CMake | Passed (author) |
-| Qt application 0.5.0 | Built and run on Windows | Built and ran (user report) |
-| `database_tests` 0.5.0 | 59 checks | **59 / 59 passed** (user report) |
-| Qt application 0.6.0 (`labdesk`) | — | **Not compiled yet** |
-| `database_tests` 0.6.0 | 59 original checks unchanged + 13 new | **Not compiled or run yet** |
-| GUI behaviour 0.6.0 | Manual guide in `docs/TESTING.md` (M1–M15 and V1–V11) | **Not performed yet** |
+| Scheduling engine + process-state model (incl. second-scale limits, RR slice guard) | `scheduler_tests`, g++ 13, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan | **208 / 208 passed** (author) |
+| Lab queue logic: dispatch order, measured metrics, what-if replay, measured → workload conversion in minutes or seconds, with rounding-error measure | `labqueue_tests`, same flags | **49 / 49 passed** (author) |
+| Test strength | Mutation checks: SRTF preemption disabled; SJF ordering broken | Both detected (26 and 4 failures) |
+| Schema v2, constraints, triggers, all service SQL, queue hand-over atomicity, v1 → v2 migration | `python3 tools/validate_schema.py` (SQLite 3.45) | **91 / 91 passed** (author) |
+| Source consistency | Script checks: members, service methods and helpers declared; methods defined; files in CMake | Passed (author) |
+| Qt application 0.5.0 / `database_tests` 0.5.0 | Built and run on Windows | Built; **59 / 59** (user report) |
+| Qt application 0.7.0 | Built and run on Windows, Qt 6.12 MinGW | Ran (user screenshots) |
+| Qt application 0.7.1 | Built and run on Windows | Ran (user screenshots) |
+| Qt application 0.7.3 (`labdesk`) | — | **Not compiled by the author** |
+| `database_tests` 0.7.x | 59 original + 13 (0.6) + 26 (queue) | **Result not yet reported** |
+| GUI behaviour 0.7.1 | Manual guide in `docs/TESTING.md` (M1–M15, V1–V11, Q1–Q10) | **Not performed yet** |
 
 ## Known limitations
 
@@ -394,7 +530,16 @@ and student views on the same committed state.
 * The process-state simulator is educational. It does not observe real OS
   processes, and the scheduler trace contains no WAITING state because the
   simulated workloads are CPU-bound.
-* No reports or exports, no session time limits, no booking or queueing.
+* No reports or exports and no session time limits. The queue serves one
+  lab-wide pool: a student cannot wait for a particular laboratory.
+* SJF and Priority can make long or practice requests wait a long time
+  (starvation); there is no aging yet. The replay's "longest wait" column
+  makes this visible.
+* "Measured lab visits" on the CPU scheduling page assumes one computer, and
+  arrivals more than 100 000 minutes (about 69 days) apart exceed the engine's
+  input limit; run such data through the Lab queue replay instead.
+* Queue positions refresh when data changes in this application. Several
+  copies of the app sharing one database file would not notify each other.
 * Version 0.6.0 of the GUI has not yet been seen running by the author. Check
   it at several window sizes and at 125 % / 150 % Windows display scaling.
 
@@ -410,9 +555,8 @@ and student views on the same committed state.
    scheduler trace includes WAITING.
 4. Usage reports (hours per computer and per student, peak times) exported
    to CSV.
-5. Session policies (maximum duration, automatic end) and a waiting queue for
-   when every computer is busy. This is a natural place to reuse the
-   scheduling ideas.
+5. Session policies (maximum duration, automatic end), aging in the lab queue,
+   and per-laboratory queues.
 6. A multi-client concurrency test (two processes allocating the same
    computer) to demonstrate isolation under real contention.
 7. Packaging: an installer via `windeployqt` or `macdeployqt`.

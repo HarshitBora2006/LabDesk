@@ -1,6 +1,7 @@
 #include "computerservice.h"
 
 #include "database.h"
+#include "queueservice.h"
 
 #include <QRegularExpression>
 #include <QSqlQuery>
@@ -114,8 +115,15 @@ OpResult ComputerService::addComputer(const Computer& input) const
         if (!q.exec())
             return OpResult::failure(friendlySqlError(q.lastError()));
     }
+    // Same transaction: a waiting student gets the new computer straight away.
+    QStringList assignments;
+    QString dispatchError;
+    if (!QueueService::dispatchWithin(db, &assignments, &dispatchError))
+        return OpResult::failure(QStringLiteral("Could not assign the computer to the lab queue: ") + dispatchError);
     if (!tx.commit())
         return OpResult::failure(QStringLiteral("Commit failed: ") + tx.lastError());
+    if (!assignments.isEmpty())
+        return OpResult::success(QStringLiteral("Computer %1 added. %2.").arg(c.computerId, assignments.join(QStringLiteral("; "))));
     return OpResult::success(QStringLiteral("Computer %1 added as AVAILABLE.").arg(c.computerId));
 }
 
@@ -192,7 +200,8 @@ DashboardStats ComputerService::dashboardStats(QString* error) const
         " (SELECT COUNT(*) FROM computer WHERE status = 'MAINTENANCE'),"
         " (SELECT COUNT(*) FROM session  WHERE status = 'ACTIVE'),"
         " (SELECT COUNT(*) FROM student),"
-        " (SELECT COUNT(*) FROM maintenance WHERE status = 'OPEN')"));
+        " (SELECT COUNT(*) FROM maintenance WHERE status = 'OPEN'),"
+        " (SELECT COUNT(*) FROM lab_request WHERE status = 'WAITING')"));
     if (!ok || !q.next()) {
         if (error)
             *error = q.lastError().text();
@@ -206,6 +215,7 @@ DashboardStats ComputerService::dashboardStats(QString* error) const
     s.activeSessions = q.value(5).toInt();
     s.students = q.value(6).toInt();
     s.openMaintenance = q.value(7).toInt();
+    s.waitingRequests = q.value(8).toInt();
     return s;
 }
 

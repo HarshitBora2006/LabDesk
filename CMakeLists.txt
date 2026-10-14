@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(LabDesk
-    VERSION 0.6.0
+    VERSION 0.7.3
     DESCRIPTION "Smart Computer Lab Management and CPU Scheduling System"
     LANGUAGES CXX)
 
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(LABDESK_BUILD_TESTS "Build scheduler_tests and database_tests" ON)
+option(LABDESK_BUILD_TESTS "Build scheduler_tests, labqueue_tests and database_tests" ON)
 
 function(labdesk_set_warnings target)
     if(MSVC)
@@ -28,6 +28,8 @@ add_library(labdesk_os STATIC
     src/scheduler.h
     src/processstate.cpp
     src/processstate.h
+    src/labqueue.cpp
+    src/labqueue.h
 )
 target_include_directories(labdesk_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 labdesk_set_warnings(labdesk_os)
@@ -47,6 +49,7 @@ add_library(labdesk_core STATIC
     src/sessionservice.cpp      src/sessionservice.h
     src/maintenanceservice.cpp  src/maintenanceservice.h
     src/processservice.cpp      src/processservice.h
+    src/queueservice.cpp        src/queueservice.h
     src/passwordhasher.cpp      src/passwordhasher.h
     src/timeutil.cpp            src/timeutil.h
     src/models.h
@@ -69,6 +72,7 @@ set(LABDESK_UI_SOURCES
     src/ui/computerspage.cpp           src/ui/computerspage.h
     src/ui/maintenancepage.cpp         src/ui/maintenancepage.h
     src/ui/sessionspage.cpp            src/ui/sessionspage.h
+    src/ui/labqueuepage.cpp            src/ui/labqueuepage.h
     src/ui/studentportalpage.cpp       src/ui/studentportalpage.h
     src/ui/schedulerpage.cpp           src/ui/schedulerpage.h
     src/ui/ganttchartwidget.cpp        src/ui/ganttchartwidget.h
@@ -101,6 +105,11 @@ if(LABDESK_BUILD_TESTS)
     target_link_libraries(scheduler_tests PRIVATE labdesk_os)
     labdesk_set_warnings(scheduler_tests)
     add_test(NAME scheduler_tests COMMAND scheduler_tests)
+
+    add_executable(labqueue_tests tests/labqueue_tests.cpp)
+    target_link_libraries(labqueue_tests PRIVATE labdesk_os)
+    labdesk_set_warnings(labqueue_tests)
+    add_test(NAME labqueue_tests COMMAND labqueue_tests)
 
     # The schema is an embedded resource, so the test embeds it too.
     add_executable(database_tests tests/database_tests.cpp resources/resources.qrc)

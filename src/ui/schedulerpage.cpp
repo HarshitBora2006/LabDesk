@@ -1,6 +1,7 @@
 #include "schedulerpage.h"
 
 #include "ganttchartwidget.h"
+#include "labqueue.h"
 #include "layouthelpers.h"
 #include "services.h"
 #include "timeutil.h"
@@ -8,6 +9,7 @@
 
 #include <QColor>
 #include <QComboBox>
+#include <QDateTime>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -60,7 +62,17 @@ private:
 
 enum InputColumn { ColId = 0, ColArrival, ColBurst, ColPriority, ColSource };
 
-constexpr qlonglong kDemoKey = -1;  // combo data for the unlinked demo workload
+constexpr qlonglong kDemoKey = -1;      // combo data for the unlinked demo workload
+constexpr qlonglong kMeasuredKey = -2;  // combo data for the measured lab visits
+constexpr std::size_t kMaxMeasuredRows = 100;  // engine limit (os::kMaxProcesses)
+
+qint64 isoToMs(const QString& iso)
+{
+    QDateTime dt = QDateTime::fromString(iso, Qt::ISODateWithMs);
+    if (!dt.isValid())
+        dt = QDateTime::fromString(iso, Qt::ISODate);
+    return dt.isValid() ? dt.toMSecsSinceEpoch() : 0;
+}
 
 const os::Algorithm kAlgorithms[] = {os::Algorithm::FCFS, os::Algorithm::SJF, os::Algorithm::SRTF,
                                      os::Algorithm::Priority, os::Algorithm::RoundRobin};
@@ -126,6 +138,20 @@ QWidget* SchedulerPage::buildWorkloadCard()
     row->addWidget(m_save);
     layout->addLayout(row);
 
+    m_timeUnitRow = new QWidget();
+    auto* unitRow = new QHBoxLayout(m_timeUnitRow);
+    unitRow->setContentsMargins(0, 0, 0, 0);
+    unitRow->setSpacing(10);
+    unitRow->addWidget(makeLabel(QStringLiteral("Time unit"), QStringLiteral("fieldLabel")));
+    m_timeUnit = new QComboBox();
+    m_timeUnit->addItem(QStringLiteral("Minutes (rounded to the nearest minute; for real sessions)"), 0);
+    m_timeUnit->addItem(QStringLiteral("Seconds (exact; for very short test visits)"), 1);
+    unitRow->addWidget(m_timeUnit, 1);
+    m_timeUnitRow->hide();
+    layout->addWidget(m_timeUnitRow);
+    connect(m_timeUnit, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &SchedulerPage::onMeasuredUnitChanged);
+
     m_sessionDetails = makeExplainer(QString());
     layout->addWidget(m_sessionDetails);
     m_workloadStatus = new MessageBanner();
@@ -164,6 +190,7 @@ QWidget* SchedulerPage::buildProcessCard()
         QStringLiteral("Where the row came from: the database, a new row you added, or the textbook example.")};
     for (int c = 0; c < 5; ++c)
         m_input->horizontalHeaderItem(c)->setToolTip(tips[c]);
+    alignNumericColumns(m_input, {ColArrival, ColBurst, ColPriority});
     m_input->verticalHeader()->setVisible(false);
     m_input->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_input->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -196,7 +223,8 @@ QWidget* SchedulerPage::buildProcessCard()
     buttons->addWidget(clear);
     layout->addLayout(buttons);
     layout->addWidget(makeLabel(QStringLiteral("Double-click a cell to edit it. Arrival and burst are in abstract "
-                                               "time units. Edits stay local until you save the workload."),
+                                               "time units, or in minutes / seconds for measured lab visits (the "
+                                               "headings show the unit). Edits stay local until you save the workload."),
                                 QStringLiteral("caption")));
 
     connect(add, &QPushButton::clicked, this, &SchedulerPage::onAddProcess);
@@ -301,6 +329,7 @@ QWidget* SchedulerPage::buildResultsCard()
                            QStringLiteral("Priority"), QStringLiteral("First run"), QStringLiteral("Completion"),
                            QStringLiteral("Turnaround"), QStringLiteral("Waiting"), QStringLiteral("Response")});
     m_results->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    alignNumericColumns(m_results, {1, 2, 3, 4, 5, 6, 7, 8});
     m_results->setMinimumHeight(200);
     layout->addWidget(m_results);
     m_resultsState = makeStateMessage();
@@ -311,8 +340,9 @@ QWidget* SchedulerPage::buildResultsCard()
     m_comparison = new QTableWidget();
     setupTable(m_comparison, {QStringLiteral("Algorithm"), QStringLiteral("Avg waiting"),
                               QStringLiteral("Avg turnaround"), QStringLiteral("Avg response"),
-                              QStringLiteral("Context switches"), QStringLiteral("CPU utilisation")});
+                              QStringLiteral("Context switches"), QStringLiteral("CPU utilisation (%)")});
     m_comparison->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    alignNumericColumns(m_comparison, {1, 2, 3, 4, 5});
     m_comparison->setFixedHeight(5 * 32 + 42);
     layout->addWidget(m_comparison);
     m_comparisonTitle->hide();
@@ -340,6 +370,16 @@ void SchedulerPage::refresh()
     m_workload->addItem(QStringLiteral("Demo workload, not linked to a session (%1)")
                             .arg(describe(ProcessService::kUnlinkedKey)),
                         kDemoKey);
+    std::vector<RequestRecord> requests;
+    QString requestError;
+    int finished = 0;
+    if (m_services.queue.history(requests, &requestError)) {
+        for (const RequestRecord& r : requests)
+            if (!r.startTime.isEmpty() && !r.endTime.isEmpty())
+                ++finished;
+    }
+    m_workload->addItem(QStringLiteral("Measured lab visits, real data, read-only (%1 finished visit(s))").arg(finished),
+                        kMeasuredKey);
     for (const SessionRecord& s : sessions) {
         m_workload->addItem(QStringLiteral("Session #%1: %2 on %3, %4 (%5)")
                                 .arg(s.sessionId)
@@ -357,8 +397,15 @@ void SchedulerPage::refresh()
 
     if (!m_loaded)
         loadSelectedWorkload();  // first time: show the selected workload straight away
+    else if (m_loadedMeasured && !m_dirty && measuredSelected() && finished != m_measuredTotal)
+        loadSelectedWorkload();  // a visit finished meanwhile: show the up-to-date real data
     else
         updateWorkloadStatus();
+}
+
+bool SchedulerPage::measuredSelected() const
+{
+    return m_workload->currentData().toLongLong() == kMeasuredKey;
 }
 
 std::optional<qint64> SchedulerPage::selectedWorkloadKey() const
@@ -371,6 +418,8 @@ std::optional<qint64> SchedulerPage::selectedWorkloadKey() const
 
 QString SchedulerPage::workloadName(std::optional<qint64> key) const
 {
+    if (m_loadedMeasured && !key)
+        return QStringLiteral("the measured lab visits");
     return key ? QStringLiteral("the workload of session #%1").arg(*key) : QStringLiteral("the demo workload");
 }
 
@@ -384,7 +433,9 @@ void SchedulerPage::onWorkloadChosen(int)
                                      QStringLiteral("Discard and load"));
         if (!discard) {
             // Put the selector back on the workload the table belongs to.
-            const int back = m_workload->findData(m_loadedKey ? static_cast<qlonglong>(*m_loadedKey) : kDemoKey);
+            const qlonglong loaded =
+                m_loadedMeasured ? kMeasuredKey : (m_loadedKey ? static_cast<qlonglong>(*m_loadedKey) : kDemoKey);
+            const int back = m_workload->findData(loaded);
             m_workload->blockSignals(true);
             m_workload->setCurrentIndex(back >= 0 ? back : 0);
             m_workload->blockSignals(false);
@@ -425,8 +476,76 @@ void SchedulerPage::showSessionDetails(std::optional<qint64> key)
                  timeutil::durationText(session->startTime, session->endTime)));
 }
 
+int SchedulerPage::loadMeasuredVisits(QString* error)
+{
+    std::vector<RequestRecord> requests;
+    if (!m_services.queue.history(requests, error))
+        return 0;
+    std::vector<lab::FinishedVisit> visits;
+    QHash<qint64, QString> students;
+    for (const RequestRecord& r : requests) {
+        if (r.startTime.isEmpty() || r.endTime.isEmpty())
+            continue;  // burst only known for finished visits
+        visits.push_back({r.requestId, isoToMs(r.requestedAt), isoToMs(r.startTime), isoToMs(r.endTime), r.priority});
+        students.insert(r.requestId, r.studentId);
+    }
+    m_measuredTotal = static_cast<int>(visits.size());
+    const lab::TimeUnit unit = m_measuredInSeconds ? lab::TimeUnit::Seconds : lab::TimeUnit::Minutes;
+    const auto rows = lab::toWorkload(visits, kMaxMeasuredRows, unit);
+    m_distortedVisits = 0;
+    for (const lab::WorkloadRow& row : rows) {
+        if (lab::roundingError(row, unit) > 0.10)
+            ++m_distortedVisits;
+        addProcessRow(QStringLiteral("R%1").arg(row.requestId), row.arrival, row.burst, row.priority,
+                      RowSource::Measured, row.requestId);
+        QTableWidgetItem* source = m_input->item(m_input->rowCount() - 1, ColSource);
+        source->setText(QStringLiteral("Measured, request #%1 (%2)").arg(row.requestId).arg(students.value(row.requestId)));
+    }
+    return static_cast<int>(rows.size());
+}
+
 void SchedulerPage::loadSelectedWorkload()
 {
+    if (measuredSelected()) {
+        m_sessionDetails->setText(QStringLiteral(
+            "Measured lab visits (from the Lab queue): every finished visit becomes one process. Process ID = R + "
+            "request number. Arrival = time after the first request. Burst = the ACTUAL session length. Priority = "
+            "purpose (exam 1, assignment 2, practice 3). Choose minutes for real sessions (readable numbers, at "
+            "most 30 s rounding) or seconds for very short test visits (exact).\n"
+            "Simulated here as if the lab had ONE computer, so SJF and SRTF know each real length in advance, which a "
+            "real lab cannot. For several computers, and SJF based on the student's estimate, use Lab queue > What-if "
+            "replay."));
+        // Decide the unit first: the conversion below depends on it.
+        m_measuredInSeconds = m_timeUnit->currentData().toInt() == 1;
+        m_timeUnitRow->show();
+        setTimeUnit(m_measuredInSeconds ? TimeLabels::Seconds : TimeLabels::Minutes);
+        QString error;
+        m_populating = true;
+        m_input->setRowCount(0);
+        m_savedRowIds.clear();
+        const int loaded = loadMeasuredVisits(&error);
+        m_populating = false;
+        m_loaded = true;
+        m_loadedKey = std::nullopt;
+        m_loadedMeasured = true;
+        m_hasSavedWorkload = false;
+        m_dirty = false;
+        clearResults();
+        if (!error.isEmpty()) {
+            m_banner->showError(QStringLiteral("The measured visits could not be loaded: ") + error);
+            showErrorState(m_inputState, error);
+        } else if (loaded == 0) {
+            showEmptyState(m_inputState, QStringLiteral("No finished lab visits yet. They appear when students request "
+                                                        "a computer in the Student portal and later end the session."));
+        } else {
+            m_inputState->hide();
+        }
+        updateWorkloadStatus();
+        return;
+    }
+    m_loadedMeasured = false;
+    m_timeUnitRow->hide();
+    setTimeUnit(TimeLabels::Abstract);
     const std::optional<qint64> key = selectedWorkloadKey();
     showSessionDetails(key);
 
@@ -460,6 +579,43 @@ void SchedulerPage::loadSelectedWorkload()
 
 void SchedulerPage::updateWorkloadStatus()
 {
+    if (m_loadedMeasured) {
+        if (m_dirty)
+            m_workloadStatus->showWarning(QStringLiteral("You changed the measured values. Results now describe your "
+                                                         "edited copy, not what really happened. Press \"Revert to "
+                                                         "saved\" to reload the real data."));
+        else if (m_input->rowCount() > 0 && !m_measuredInSeconds && m_distortedVisits > 0)
+            m_workloadStatus->showWarning(
+                QStringLiteral("Loaded %1 real visit(s) in minutes. %2 of them are so short that rounding to whole "
+                               "minutes changes their length by more than 10 % (typical for quick test visits). "
+                               "Switch the time unit to Seconds to see them exactly.")
+                    .arg(m_input->rowCount())
+                    .arg(m_distortedVisits));
+        else if (m_input->rowCount() > 0)
+            m_workloadStatus->showInfo(QStringLiteral("Loaded %1 real visit(s) from the database%2, in %3. These are "
+                                                      "measured values, not typed-in inputs, so they cannot be saved "
+                                                      "over.%4")
+                                           .arg(m_input->rowCount())
+                                           .arg(m_measuredTotal > m_input->rowCount()
+                                                    ? QStringLiteral(" (the most recent %1 of %2)")
+                                                          .arg(m_input->rowCount())
+                                                          .arg(m_measuredTotal)
+                                                    : QString(),
+                                                m_measuredInSeconds ? QStringLiteral("seconds")
+                                                                    : QStringLiteral("minutes"),
+                                                m_measuredInSeconds ? QString()
+                                                                    : QStringLiteral(" Rounding to whole minutes "
+                                                                                     "changed no visit by more than "
+                                                                                     "10 %.")));
+        else
+            m_workloadStatus->showInfo(QStringLiteral("No finished lab visits to load yet."));
+        m_save->setText(QStringLiteral("Save workload"));
+        m_save->setEnabled(false);
+        m_save->setToolTip(QStringLiteral("Measured visits come from the Lab queue and are read-only here."));
+        m_revert->setEnabled(m_dirty);
+        return;
+    }
+    m_save->setToolTip(QString());
     const QString name = workloadName(m_loadedKey);
     const QString capitalName = name.left(1).toUpper() + name.mid(1);
     if (m_dirty) {
@@ -501,6 +657,11 @@ void SchedulerPage::markDirty()
 
 void SchedulerPage::onSaveWorkload()
 {
+    if (m_loadedMeasured) {
+        m_banner->showWarning(QStringLiteral("Measured lab visits are read-only. Choose a session or the demo workload "
+                                             "to save simulation inputs."));
+        return;
+    }
     std::vector<os::Process> processes;
     if (!readProcesses(processes))
         return;
@@ -560,11 +721,15 @@ void SchedulerPage::addProcessRow(const QString& id, int arrival, int burst, int
     case RowSource::Saved: text = QStringLiteral("Database row #%1").arg(databaseRow); break;
     case RowSource::New: text = QStringLiteral("New, not saved"); break;
     case RowSource::Example: text = QStringLiteral("Example, not saved"); break;
+    case RowSource::Measured: text = QStringLiteral("Measured, request #%1").arg(databaseRow); break;
     }
     auto* sourceItem = new QTableWidgetItem(text);
     sourceItem->setFlags(sourceItem->flags() & ~Qt::ItemIsEditable);
-    sourceItem->setData(Qt::UserRole, static_cast<qlonglong>(databaseRow));
-    sourceItem->setForeground(source == RowSource::Saved ? QColor("#1E40AF") : QColor("#64748B"));
+    // UserRole holds a PROCESS row id only for saved rows (used for the "edited" marker).
+    sourceItem->setData(Qt::UserRole, source == RowSource::Saved ? static_cast<qlonglong>(databaseRow) : 0LL);
+    sourceItem->setForeground(source == RowSource::Saved      ? QColor("#1E40AF")
+                              : source == RowSource::Measured ? QColor("#166534")
+                                                              : QColor("#64748B"));
     m_input->setItem(row, ColSource, sourceItem);
     m_populating = wasPopulating;
 }
@@ -574,7 +739,12 @@ void SchedulerPage::onCellChanged(QTableWidgetItem* item)
     if (m_populating || !item || item->column() == ColSource)
         return;
     QTableWidgetItem* source = m_input->item(item->row(), ColSource);
-    if (source && source->data(Qt::UserRole).toLongLong() > 0) {
+    if (source && m_loadedMeasured && !source->text().endsWith(QStringLiteral(", edited"))
+        && source->text().startsWith(QStringLiteral("Measured"))) {
+        m_populating = true;
+        source->setText(source->text() + QStringLiteral(", edited"));
+        m_populating = false;
+    } else if (source && source->data(Qt::UserRole).toLongLong() > 0) {
         m_populating = true;  // the text change below must not re-enter this handler's logic
         source->setText(QStringLiteral("Database row #%1, edited").arg(source->data(Qt::UserRole).toLongLong()));
         m_populating = false;
@@ -638,6 +808,36 @@ void SchedulerPage::loadTextbookSample()
     addProcessRow(QStringLiteral("P4"), 3, 6, 4, RowSource::Example);
     m_populating = false;
     markDirty();
+}
+
+void SchedulerPage::setTimeUnit(TimeLabels labels)
+{
+    const QString unit = labels == TimeLabels::Minutes   ? QStringLiteral(" (min)")
+                         : labels == TimeLabels::Seconds ? QStringLiteral(" (s)")
+                                                         : QString();
+    if (QTableWidgetItem* h = m_input->horizontalHeaderItem(ColArrival))
+        h->setText(QStringLiteral("Arrival time") + unit);
+    if (QTableWidgetItem* h = m_input->horizontalHeaderItem(ColBurst))
+        h->setText(QStringLiteral("Burst time") + unit);
+    m_quantumLabel->setText(labels == TimeLabels::Minutes   ? QStringLiteral("Time quantum in minutes (Round Robin only)")
+                            : labels == TimeLabels::Seconds ? QStringLiteral("Time quantum in seconds (Round Robin only)")
+                                                            : QStringLiteral("Time quantum (Round Robin only)"));
+}
+
+void SchedulerPage::onMeasuredUnitChanged()
+{
+    if (!m_loadedMeasured || !measuredSelected())
+        return;
+    if (m_dirty
+        && !confirm(this, QStringLiteral("Change time unit"),
+                    QStringLiteral("Changing the unit reloads the measured visits and discards your edits. Continue?"),
+                    QStringLiteral("Reload"))) {
+        m_timeUnit->blockSignals(true);
+        m_timeUnit->setCurrentIndex(m_measuredInSeconds ? 1 : 0);
+        m_timeUnit->blockSignals(false);
+        return;
+    }
+    loadSelectedWorkload();
 }
 
 void SchedulerPage::updateTableState()
@@ -730,7 +930,7 @@ void SchedulerPage::onCompareAll()
             m_comparison->setItem(i, 2, makeNumberItem(r.averageTurnaround, 2));
             m_comparison->setItem(i, 3, makeNumberItem(r.averageResponse, 2));
             m_comparison->setItem(i, 4, makeNumberItem(r.contextSwitches));
-            m_comparison->setItem(i, 5, makeItem(QStringLiteral("%1 %").arg(r.cpuUtilisation * 100.0, 0, 'f', 1)));
+            m_comparison->setItem(i, 5, makeNumberItem(r.cpuUtilisation * 100.0, 1));
         }
     } catch (const std::exception& e) {
         m_banner->showError(QString::fromStdString(e.what()));
@@ -766,12 +966,21 @@ void SchedulerPage::showResult(const os::ScheduleResult& r)
     QString title = QString::fromStdString(os::algorithmName(r.algorithm));
     if (r.algorithm == os::Algorithm::RoundRobin)
         title += QStringLiteral(", time quantum %1").arg(r.quantum);
+    const QString unit = !m_loadedMeasured     ? QStringLiteral("time unit(s)")
+                         : m_measuredInSeconds ? QStringLiteral("second(s)")
+                                               : QStringLiteral("minute(s)");
     m_resultTitle->setText(QStringLiteral("%1 on %2 process(es). All processes finished at time %3; the CPU was "
-                                          "idle for %4 time unit(s). Hatched bars in the chart are idle time.")
+                                          "idle for %4 %5. Hatched bars in the chart are idle time.%6")
                                .arg(title)
                                .arg(static_cast<int>(r.processes.size()))
                                .arg(r.makespan)
-                               .arg(r.idleTime));
+                               .arg(r.idleTime)
+                               .arg(unit,
+                                    m_loadedMeasured ? QStringLiteral(" All times in this result are in %1 "
+                                                                      "(measured lab visits, one computer).")
+                                                           .arg(m_measuredInSeconds ? QStringLiteral("seconds")
+                                                                                    : QStringLiteral("minutes"))
+                                                     : QString()));
     m_resultTitle->show();
     m_metricValues.value(QStringLiteral("wt"))->setText(QString::number(r.averageWaiting, 'f', 2));
     m_metricValues.value(QStringLiteral("tat"))->setText(QString::number(r.averageTurnaround, 'f', 2));

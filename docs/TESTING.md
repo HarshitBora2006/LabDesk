@@ -5,6 +5,7 @@ There are three layers of tests:
 | Layer | Command | Needs |
 |---|---|---|
 | Scheduling engine + process-state model | `ctest --test-dir build -R scheduler_tests --output-on-failure` (or run `build/scheduler_tests`) | C++17 compiler only |
+| Lab queue logic (dispatch order, measured metrics, replay) | `ctest --test-dir build -R labqueue_tests --output-on-failure` | C++17 compiler only |
 | Database services through Qt SQL | `ctest --test-dir build -R database_tests --output-on-failure` | Qt 6 Core + Sql |
 | Schema and SQL sequences, independent of Qt | `python3 tools/validate_schema.py` | Python 3 (stdlib `sqlite3`) |
 | GUI workflows | Manual steps below | Built application |
@@ -13,17 +14,19 @@ There are three layers of tests:
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -Isrc src/scheduler.cpp src/processstate.cpp tests/scheduler_tests.cpp -o scheduler_tests
-./scheduler_tests
+g++ -std=c++17 -Wall -Wextra -Isrc src/labqueue.cpp tests/labqueue_tests.cpp -o labqueue_tests
+./scheduler_tests && ./labqueue_tests
 ```
 
-## Status at hand-over (version 0.6.0)
+## Status at hand-over (version 0.7.3)
 
 | Suite | Result | Notes |
 |---|---|---|
-| `scheduler_tests` | **204 passed, 0 failed** (author) | g++ 13.3, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan. Includes SRTF, transition explanations and seeding from a schedule |
-| `validate_schema.py` | **62 passed, 0 failed** (author) | SQLite 3.45.1; includes the new dashboard, lab-summary, session-lookup and workload-size queries |
-| `database_tests` | **not yet run on 0.6.0** | 0.5.0 passed 59 / 59 on Windows (user report). 0.6.0 keeps those 59 checks unchanged and adds 13 |
-| Manual GUI tests | **not yet run on 0.6.0** | Qt is not available in the authoring environment |
+| `scheduler_tests` | **208 passed, 0 failed** (author) | g++ 13.3, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan |
+| `labqueue_tests` | **49 passed, 0 failed** (author) | Same flags. Hand-calculated dispatch and replay cases, 300 random labs × 3 policies, and the measured-visits-to-workload conversion in minutes (61 min → 61, 2 h → 120, <1 % error; short visits flagged >10 %) and seconds (147 s → 147, 4.4 s → 4) |
+| `validate_schema.py` | **91 passed, 0 failed** (author) | SQLite 3.45.1. Includes the queue workflows, hand-over atomicity and the v1 → v2 migration |
+| `database_tests` | **not yet reported for 0.7.x** | 0.5.0 passed 59 / 59 on Windows (user report). 0.7.0 keeps those 59 and adds 39 |
+| Manual GUI tests | **not yet run on 0.7.0** | Qt is not available in the authoring environment |
 
 Do not mark a test as passed until you have run it yourself. Record your
 results in the [results log](#results-log) at the end of this file.
@@ -169,6 +172,27 @@ areas came from.
 | **V10** *(lifecycle)* | Process states → Create process → Dispatch to CPU (refused) → Admit → Dispatch → Block for I/O → Dispatch (refused) → Complete I/O → Dispatch → Terminate. Create a second process and try to dispatch it while the first runs. | Refused actions show a Warning with the reason (must be admitted first; still waiting for I/O; CPU busy). Allowed actions update the current state, the last action (previous and new state), the CPU indicator, the history and the highlighted diagram node. |
 | **V11** *(scheduler to lifecycle)* | Run any algorithm on CPU scheduling, then on Process states press **Create from last CPU scheduling run**. | The scheduler's process IDs appear in the NEW state. The trace tab shows the scheduler's own state changes with the time slider. |
 
+## Manual checks for the lab queue (0.7.0)
+
+The demo data has 20 computers and only 4 students, so the lab is never full.
+For these steps use a small lab: start `labdesk --db queue-test.db --no-seed`,
+add two computers (`PC-01`, `PC-02`, both in "Lab A") and five students
+(`T1`–`T5`, password `secret1`). Use **Sign out** between students in the
+portal.
+
+| Step | Action | Expected result |
+|---|---|---|
+| **Q1** *(immediate)* | Portal as T1: purpose Assignment, 30 min, select PC-01, **Start session on selected computer**. | Success message: "You are now using PC-01… you waited 0 minutes". Lab queue → Measured results shows request #1 with arrival = start and *Granted by* IMMEDIATE. |
+| **Q2** | T2: Practice, 90 min, start on PC-02. | Both computers OCCUPIED. Dashboard "Waiting in queue" is 0. |
+| **Q3** *(queue)* | T3: Practice, 60 min. Then T4: Exam, 15 min. Then T5: Assignment, 20 min. | The free-computer table is replaced by "No computers available for allocation…", and each student uses **Join the waiting queue**. Each portal shows "You are number N of M", Waiting for… ticking, and *Leave queue*. Lab queue lists all three, and the dashboard shows 3 waiting. |
+| **Q4** *(policy)* | Lab queue: apply FCFS, then SJF, then Priority, reading the waiting list each time. | FCFS: T3, T4, T5. SJF: T4 (15), T5 (20), T3 (60). Priority: T4 (exam), T5 (assignment), T3 (practice). Positions in the portals change to match. |
+| **Q5** *(hand-over)* | With **SJF**, end T1's session in the portal (or Sessions → End selected session). | PC-01 goes straight to T4 in the same action. The Sessions transaction log (if run from the demo tab) shows the "Lab queue: assign…" step before COMMIT. T4's request shows *Granted by* SJF and a waiting time in minutes. |
+| **Q6** *(fairness and rules)* | T5 and T3 are still waiting. In Sessions → Transaction demonstration, try to allocate any computer directly. Then, in the portal, try to join the queue twice (T5) and to join while in a session (T4). | The direct allocation is refused before anything changes ("…waiting in the lab queue…"; the log ends with ROLLBACK). The other two attempts are refused with clear messages. |
+| **Q7** *(new computer and repair serve the queue)* | (a) Add computer PC-03: it goes to T5 at once. (b) End T5's session: PC-03 goes to T3, and the queue is now empty. (c) End T4's session (PC-01 stays AVAILABLE because nobody waits), then report an issue on PC-01. (d) T1 joins the queue (Practice, 30 min) and waits. (e) Resolve the PC-01 issue. | Steps (a), (b) and (e) each say "…assigned to waiting student…", and the student's portal switches to "You are using…". After (e), T1's request shows *Granted by* with the active policy. |
+| **Q8** *(measured results)* | After a few sessions have ended, open Lab queue → Measured results. | For each finished visit: Waiting = Start − Arrival, Actual burst = End − Start, Turnaround = End − Arrival, and estimate error = burst − expected. Check one row by hand. Averages count finished visits only. |
+| **Q9** *(replay and persistence)* | Press **Replay with all three policies** with 2 computers, then 1. Restart the app with the same `--db`. | The replay table shows averages for FCFS, SJF and Priority; with 1 computer the waits grow. After restart the policy, waiting list and measured history are unchanged. |
+| **Q10** *(measured workload, 0.7.1)* | CPU scheduling → Workload → "Measured lab visits…". Run FCFS and SJF, then edit one burst and press **Revert to saved**. End another visit in the portal and come back. | One row per finished visit, `R<request>`. With **Time unit = Minutes** (default), the headings read "(min)": a 2:27 visit shows burst 2, a 0:04 test visit shows 1, and a Warning reports how many visits rounding changed by more than 10 %. With **Seconds**, the headings read "(s)" and the same visits show 147 and 4. A real 1-hour visit shows 60 in minutes, priority 1–3, Source "Measured, request #n (student)". *Save workload* is disabled. Editing marks the row "edited" and shows a Warning; Revert restores the real values. After another visit ends, the table reloads by itself (only if you had no unsaved edits). |
+
 ## Results log
 
 Fill this in when you run the tests. Leave cells empty rather than guessing.
@@ -181,6 +205,8 @@ Fill this in when you run the tests. Leave cells empty rather than guessing.
 | | | | `validate_schema.py` | | |
 | | | | M1 – M15 | | |
 | | | | V1 – V11 (0.6.0) | | |
+| | | | `labqueue_tests` | | |
+| | | | Q1 – Q10 (0.7.x) | | |
 
 ## Writing up failures
 

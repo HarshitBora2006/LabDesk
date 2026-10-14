@@ -88,6 +88,7 @@ struct DashboardStats {
     int activeSessions = 0;
     int students = 0;
     int openMaintenance = 0;
+    int waitingRequests = 0;  // students in the lab queue
 };
 
 }  // namespace labdesk

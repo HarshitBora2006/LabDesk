@@ -5,6 +5,7 @@
 #include "computerservice.h"
 #include "maintenanceservice.h"
 #include "processservice.h"
+#include "queueservice.h"
 #include "sessionservice.h"
 #include "studentservice.h"
 
@@ -14,7 +15,7 @@ class Database;
 
 struct Services {
     explicit Services(Database& db)
-        : students(db), computers(db), sessions(db), maintenance(db), processes(db)
+        : students(db), computers(db), sessions(db), maintenance(db), processes(db), queue(db)
     {
     }
 
@@ -23,6 +24,7 @@ struct Services {
     SessionService sessions;
     MaintenanceService maintenance;
     ProcessService processes;
+    QueueService queue;
 };
 
 }  // namespace labdesk

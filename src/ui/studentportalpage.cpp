@@ -1,16 +1,20 @@
 #include "studentportalpage.h"
 
+#include "labqueue.h"
 #include "services.h"
 #include "timeutil.h"
 #include "uihelpers.h"
 
+#include <QComboBox>
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTimer>
@@ -24,6 +28,7 @@ StudentPortalPage::StudentPortalPage(Services& services, QWidget* parent) : Page
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     m_stack = new QStackedWidget();
+    m_stack->setObjectName(QStringLiteral("pageStack"));
     m_stack->addWidget(buildLogin());
     m_stack->addWidget(buildDashboard());
     root->addWidget(m_stack);
@@ -37,7 +42,7 @@ QWidget* StudentPortalPage::buildLogin()
 {
     auto* page = new QWidget();
     QVBoxLayout* outer = makePageLayout(page, QStringLiteral("Student portal"),
-                                        QStringLiteral("Sign in to pick a lab computer or end your session."));
+                                        QStringLiteral("Sign in to request a lab computer or end your session."));
     auto* centre = new QHBoxLayout();
     centre->addStretch();
     QFrame* card = makeCard();
@@ -75,10 +80,10 @@ QWidget* StudentPortalPage::buildLogin()
 QWidget* StudentPortalPage::buildDashboard()
 {
     auto* page = new QWidget();
-    page->setObjectName(QStringLiteral("pageRoot"));
-    auto* root = new QVBoxLayout(page);
-    root->setContentsMargins(28, 22, 28, 22);
-    root->setSpacing(14);
+    QWidget* body = makeScrollPage(page);
+    auto* root = new QVBoxLayout(body);
+    root->setContentsMargins(32, 26, 32, 28);
+    root->setSpacing(16);
 
     auto* header = new QHBoxLayout();
     auto* titles = new QVBoxLayout();
@@ -95,47 +100,96 @@ QWidget* StudentPortalPage::buildDashboard()
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
-    QFrame* sessionCard = makeCard();
-    QVBoxLayout* session = cardLayout(sessionCard);
-    session->addWidget(makeLabel(QStringLiteral("Your session"), QStringLiteral("sectionTitle")));
-    auto* sessionRow = new QHBoxLayout();
-    auto* sessionText = new QVBoxLayout();
-    m_sessionSummary = makeLabel(QString());
-    QFont big = m_sessionSummary->font();
+    // ---- current visit
+    QFrame* visitCard = makeCard();
+    QVBoxLayout* visit = cardLayout(visitCard);
+    visit->addWidget(makeLabel(QStringLiteral("Your visit"), QStringLiteral("sectionTitle")));
+    auto* visitRow = new QHBoxLayout();
+    auto* visitText = new QVBoxLayout();
+    m_visitSummary = makeLabel(QString());
+    QFont big = m_visitSummary->font();
     big.setPointSizeF(big.pointSizeF() * 1.25);
     big.setBold(true);
-    m_sessionSummary->setFont(big);
-    m_sessionDetails = makeLabel(QString(), QStringLiteral("muted"));
+    m_visitSummary->setFont(big);
+    m_visitDetails = makeLabel(QString(), QStringLiteral("muted"));
     m_elapsed = makeLabel(QString(), QStringLiteral("muted"));
-    sessionText->addWidget(m_sessionSummary);
-    sessionText->addWidget(m_sessionDetails);
-    sessionText->addWidget(m_elapsed);
-    sessionRow->addLayout(sessionText, 1);
+    visitText->addWidget(m_visitSummary);
+    visitText->addWidget(m_visitDetails);
+    visitText->addWidget(m_elapsed);
+    visitRow->addLayout(visitText, 1);
+    m_leaveQueue = makeButton(QStringLiteral("Leave queue"), QStringLiteral("danger"));
     m_endSession = makeButton(QStringLiteral("End session"), QStringLiteral("primary"));
-    sessionRow->addWidget(m_endSession, 0, Qt::AlignVCenter);
-    session->addLayout(sessionRow);
-    root->addWidget(sessionCard);
+    visitRow->addWidget(m_leaveQueue, 0, Qt::AlignVCenter);
+    visitRow->addWidget(m_endSession, 0, Qt::AlignVCenter);
+    visit->addLayout(visitRow);
+    root->addWidget(visitCard);
 
-    QFrame* availableCard = makeCard();
-    QVBoxLayout* available = cardLayout(availableCard);
-    auto* availableHeader = new QHBoxLayout();
-    availableHeader->addWidget(makeLabel(QStringLiteral("Available computers"), QStringLiteral("sectionTitle")), 1);
-    m_useComputer = makeButton(QStringLiteral("Use selected computer"), QStringLiteral("primary"));
-    availableHeader->addWidget(m_useComputer);
-    available->addLayout(availableHeader);
+    // ---- request a computer
+    QFrame* requestCard = makeCard();
+    QVBoxLayout* request = cardLayout(requestCard);
+    request->addWidget(makeLabel(QStringLiteral("Request a computer"), QStringLiteral("sectionTitle")));
+    m_requestHint = makeLabel(QString(), QStringLiteral("caption"));
+    request->addWidget(m_requestHint);
+
+    m_requestBody = new QWidget();
+    auto* bodyLayout = new QVBoxLayout(m_requestBody);
+    bodyLayout->setContentsMargins(0, 0, 0, 0);
+    bodyLayout->setSpacing(10);
+    auto* fields = new QHBoxLayout();
+    fields->setSpacing(10);
+    fields->addWidget(makeLabel(QStringLiteral("Purpose"), QStringLiteral("fieldLabel")));
+    m_purpose = new QComboBox();
+    for (lab::Purpose p : {lab::Purpose::Exam, lab::Purpose::Assignment, lab::Purpose::Practice}) {
+        m_purpose->addItem(QStringLiteral("%1 (priority %2)")
+                               .arg(QString::fromStdString(lab::purposeName(p)))
+                               .arg(lab::priorityFor(p)),
+                           QString::fromLatin1(lab::purposeCode(p)));
+    }
+    m_purpose->setCurrentIndex(1);
+    fields->addWidget(m_purpose);
+    fields->addSpacing(12);
+    fields->addWidget(makeLabel(QStringLiteral("Expected length"), QStringLiteral("fieldLabel")));
+    m_expected = new QSpinBox();
+    m_expected->setRange(lab::kMinExpectedMinutes, lab::kMaxExpectedMinutes);
+    m_expected->setSingleStep(5);
+    m_expected->setValue(60);
+    m_expected->setSuffix(QStringLiteral(" min"));
+    fields->addWidget(m_expected);
+    fields->addStretch(1);
+    bodyLayout->addLayout(fields);
+    bodyLayout->addWidget(makeLabel(QStringLiteral("Your purpose sets your priority if the lab is full (exam first, "
+                                                   "then assignment, then practice). Your expected length is used by "
+                                                   "the shortest-job-first policy. Your real waiting time and session "
+                                                   "length are recorded automatically."),
+                                    QStringLiteral("caption")));
+
     m_available = new QTableWidget();
     setupTable(m_available, {QStringLiteral("Computer ID"), QStringLiteral("Name"), QStringLiteral("Location"),
                              QStringLiteral("Status")});
-    available->addWidget(m_available, 1);
+    m_available->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_available->setMinimumHeight(200);
+    bodyLayout->addWidget(m_available);
     m_noneAvailable = makeStateMessage();
-    available->addWidget(m_noneAvailable);
-    root->addWidget(availableCard, 1);
+    bodyLayout->addWidget(m_noneAvailable);
+
+    auto* buttons = new QHBoxLayout();
+    buttons->addStretch(1);
+    m_joinQueue = makeButton(QStringLiteral("Join the waiting queue"), QStringLiteral("primary"));
+    m_startNow = makeButton(QStringLiteral("Start session on selected computer"), QStringLiteral("primary"));
+    buttons->addWidget(m_joinQueue);
+    buttons->addWidget(m_startNow);
+    bodyLayout->addLayout(buttons);
+    request->addWidget(m_requestBody);
+    root->addWidget(requestCard);
+    root->addStretch(1);
 
     connect(signOut, &QPushButton::clicked, this, &StudentPortalPage::onSignOut);
     connect(m_endSession, &QPushButton::clicked, this, &StudentPortalPage::onEndSession);
-    connect(m_useComputer, &QPushButton::clicked, this, &StudentPortalPage::onUseComputer);
-    connect(m_available, &QTableWidget::itemSelectionChanged, this, &StudentPortalPage::updateUseButton);
-    connect(m_available, &QTableWidget::itemDoubleClicked, this, [this]() { onUseComputer(); });
+    connect(m_leaveQueue, &QPushButton::clicked, this, &StudentPortalPage::onLeaveQueue);
+    connect(m_startNow, &QPushButton::clicked, this, &StudentPortalPage::onStartNow);
+    connect(m_joinQueue, &QPushButton::clicked, this, &StudentPortalPage::onJoinQueue);
+    connect(m_available, &QTableWidget::itemSelectionChanged, this, &StudentPortalPage::updateRequestControls);
+    connect(m_available, &QTableWidget::itemDoubleClicked, this, [this]() { onStartNow(); });
     return page;
 }
 
@@ -158,10 +212,15 @@ void StudentPortalPage::onSignIn()
 void StudentPortalPage::onSignOut()
 {
     m_studentId.clear();
-    m_sessionStart.clear();
+    m_timerStart.clear();
     m_clock->stop();
     m_loginId->clear();
     m_stack->setCurrentIndex(0);
+}
+
+QString StudentPortalPage::selectedPurpose() const
+{
+    return m_purpose->currentData().toString();
 }
 
 void StudentPortalPage::refresh()
@@ -178,31 +237,54 @@ void StudentPortalPage::refresh()
     m_welcome->setText(QStringLiteral("Hello, %1").arg(student->name));
     m_identity->setText(QStringLiteral("Student ID %1, %2").arg(student->studentId, student->department));
 
-    QString error;
-    const auto session = m_services.sessions.activeSessionForStudent(m_studentId, &error);
-    if (!error.isEmpty()) {
-        m_sessionStart.clear();
-        m_sessionSummary->setText(QStringLiteral("Session status unavailable"));
-        m_sessionDetails->setText(QStringLiteral("Your session could not be read from the database: ") + error);
-        m_endSession->setVisible(false);
-        m_clock->stop();
-    } else if (session) {
-        m_sessionStart = session->startTime;
-        m_sessionSummary->setText(QStringLiteral("You are using %1").arg(session->computerId));
-        m_sessionDetails->setText(QStringLiteral("%1, %2. Started %3.")
-                                      .arg(session->computerName, session->location,
-                                           timeutil::toDisplay(session->startTime)));
-        m_endSession->setVisible(true);
-        m_clock->start();
+    // ---- current visit: in a session, waiting in the queue, or neither
+    QString sessionError;
+    const auto session = m_services.sessions.activeSessionForStudent(m_studentId, &sessionError);
+    QString queueError;
+    m_queueLength = 0;
+    const auto entry = m_services.queue.waitingEntryFor(m_studentId, &m_queueLength, &queueError);
+    const QString policyName = QString::fromStdString(lab::policyName(m_services.queue.policy()));
+    m_inSession = sessionError.isEmpty() && session.has_value();
+    m_waiting = queueError.isEmpty() && entry.has_value();
+
+    if (!sessionError.isEmpty() || !queueError.isEmpty()) {
+        m_timerStart.clear();
+        m_visitSummary->setText(QStringLiteral("Visit status unavailable"));
+        m_visitDetails->setText(QStringLiteral("Your session or queue entry could not be read from the database: ")
+                                + (sessionError.isEmpty() ? queueError : sessionError));
+    } else if (m_inSession) {
+        m_timerStart = session->startTime;
+        m_timerPrefix = QStringLiteral("Time at the computer");
+        m_visitSummary->setText(QStringLiteral("You are using %1").arg(session->computerId));
+        m_visitDetails->setText(QStringLiteral("%1, %2. Started %3. Your session length is measured when you press "
+                                               "End session.")
+                                    .arg(session->computerName, session->location,
+                                         timeutil::toDisplay(session->startTime)));
+    } else if (m_waiting) {
+        m_timerStart = entry->requestedAt;
+        m_timerPrefix = QStringLiteral("Waiting for");
+        m_visitSummary->setText(QStringLiteral("You are number %1 of %2 in the queue").arg(entry->position).arg(m_queueLength));
+        m_visitDetails->setText(QStringLiteral("Requested %1 for %2 (priority %3), expected %4 min. Policy: %5. The next "
+                                               "free computer is assigned automatically; this page updates when it "
+                                               "happens.")
+                                    .arg(timeutil::toDisplay(entry->requestedAt), entry->purpose.toLower())
+                                    .arg(entry->priority)
+                                    .arg(entry->expectedMinutes)
+                                    .arg(policyName));
     } else {
-        m_sessionStart.clear();
-        m_sessionSummary->setText(QStringLiteral("No active computer session."));
-        m_sessionDetails->setText(QStringLiteral("Choose an available computer below to start a session."));
-        m_endSession->setVisible(false);
-        m_clock->stop();
+        m_timerStart.clear();
+        m_visitSummary->setText(QStringLiteral("No active computer session."));
+        m_visitDetails->setText(QStringLiteral("Request a computer below. If none is free you can join the queue."));
     }
+    m_endSession->setVisible(m_inSession);
+    m_leaveQueue->setVisible(m_waiting);
+    if (m_timerStart.isEmpty())
+        m_clock->stop();
+    else
+        m_clock->start();
     updateElapsed();
 
+    // ---- free computers
     QString listError;
     const auto computers = m_services.computers.listComputers(ComputerStatus::Available, &listError);
     const QString keep = selectedRowData(m_available).toString();
@@ -224,48 +306,95 @@ void StudentPortalPage::refresh()
         showErrorState(m_noneAvailable, listError);
     } else if (computers.empty()) {
         m_available->hide();
-        showEmptyState(m_noneAvailable, QStringLiteral("No computers available for allocation. Every computer is "
-                                                       "in use or under maintenance; check back in a few minutes."));
+        showEmptyState(m_noneAvailable, QStringLiteral("No computers available for allocation. Join the waiting queue "
+                                                       "and the next free computer will be assigned to you under the "
+                                                       "%1 policy.")
+                                            .arg(policyName));
+    } else if (m_queueLength > 0 && !m_waiting) {
+        m_available->hide();
+        showEmptyState(m_noneAvailable, QStringLiteral("%1 student(s) are already waiting, so free computers are "
+                                                       "assigned from the queue. Join the queue to take your turn.")
+                                            .arg(m_queueLength));
     } else {
         m_available->show();
         m_noneAvailable->hide();
     }
-    updateUseButton();
+    updateRequestControls();
+}
+
+void StudentPortalPage::updateRequestControls()
+{
+    const bool busy = m_inSession || m_waiting;
+    m_requestBody->setEnabled(!busy);
+    if (m_inSession)
+        m_requestHint->setText(QStringLiteral("You already have a computer. End your session before requesting "
+                                              "another one."));
+    else if (m_waiting)
+        m_requestHint->setText(QStringLiteral("You are in the queue. Leave the queue if you no longer need a computer."));
+    else
+        m_requestHint->setText(QStringLiteral("Tell the lab why you need a computer and for about how long."));
+
+    // isHidden(): explicit hide() only, so this also works while the page is off-screen.
+    const bool tableUsable = !m_available->isHidden() && m_available->rowCount() > 0;
+    m_startNow->setVisible(tableUsable);
+    m_startNow->setEnabled(!busy && selectedRowData(m_available).isValid());
+    m_joinQueue->setVisible(!tableUsable && !m_waiting);
+    m_joinQueue->setEnabled(!busy);
 }
 
 void StudentPortalPage::updateElapsed()
 {
-    m_elapsed->setVisible(!m_sessionStart.isEmpty());
-    if (!m_sessionStart.isEmpty())
-        m_elapsed->setText(QStringLiteral("Elapsed: ") + timeutil::durationText(m_sessionStart));
+    m_elapsed->setVisible(!m_timerStart.isEmpty());
+    if (!m_timerStart.isEmpty())
+        m_elapsed->setText(QStringLiteral("%1: %2").arg(m_timerPrefix, timeutil::durationText(m_timerStart)));
 }
 
-void StudentPortalPage::updateUseButton()
+void StudentPortalPage::onStartNow()
 {
-    const bool hasSession = !m_sessionStart.isEmpty();
-    m_useComputer->setEnabled(!hasSession && selectedRowData(m_available).isValid());
-    m_useComputer->setToolTip(hasSession ? QStringLiteral("End your current session before choosing another computer.")
-                                         : QString());
-}
-
-void StudentPortalPage::onUseComputer()
-{
-    if (m_studentId.isEmpty())
+    if (m_studentId.isEmpty() || m_inSession || m_waiting)
         return;
     const QString computerId = selectedRowData(m_available).toString();
     if (computerId.isEmpty()) {
-        m_banner->showError(QStringLiteral("Select a computer first."));
+        m_banner->showWarning(QStringLiteral("Select a computer first."));
         return;
     }
-    // The service re-checks availability and the one-session rule inside its
-    // transaction; the table above may already be out of date.
-    const OpResult r = m_services.sessions.allocateComputer(m_studentId, computerId);
+    // The service re-checks availability, the queue and the one-session rule
+    // inside its transaction; the table may already be out of date.
+    const OpResult r = m_services.queue.startNow(m_studentId, computerId, selectedPurpose(), m_expected->value());
     if (r.ok)
-        m_banner->showSuccess(QStringLiteral("You are now using %1. Remember to end your session when you leave.")
-                                  .arg(computerId));
+        m_banner->showSuccess(r.message);
     else
         m_banner->showError(QStringLiteral("Could not start the session: ") + r.message);
     emit dataChanged();  // refresh this page and every admin view
+}
+
+void StudentPortalPage::onJoinQueue()
+{
+    if (m_studentId.isEmpty() || m_inSession || m_waiting)
+        return;
+    const OpResult r = m_services.queue.joinQueue(m_studentId, selectedPurpose(), m_expected->value());
+    if (r.ok)
+        m_banner->showSuccess(r.message);
+    else
+        m_banner->showError(QStringLiteral("Could not join the queue: ") + r.message);
+    emit dataChanged();
+}
+
+void StudentPortalPage::onLeaveQueue()
+{
+    if (m_studentId.isEmpty())
+        return;
+    if (!confirm(this, QStringLiteral("Leave queue"),
+                 QStringLiteral("Leave the queue? If you need a computer later you will join at the back."),
+                 QStringLiteral("Leave queue"))) {
+        return;
+    }
+    const OpResult r = m_services.queue.cancelWaiting(m_studentId);
+    if (r.ok)
+        m_banner->showInfo(r.message);
+    else
+        m_banner->showError(r.message);
+    emit dataChanged();
 }
 
 void StudentPortalPage::onEndSession()
@@ -273,13 +402,14 @@ void StudentPortalPage::onEndSession()
     if (m_studentId.isEmpty())
         return;
     if (!confirm(this, QStringLiteral("End session"),
-                 QStringLiteral("End your session now? The computer will be released for other students."),
+                 QStringLiteral("End your session now? The computer will be released for the next student."),
                  QStringLiteral("End session"))) {
         return;
     }
     const OpResult r = m_services.sessions.endActiveSession(m_studentId);
     if (r.ok)
-        m_banner->showSuccess(QStringLiteral("Session ended. Thank you for releasing the computer."));
+        m_banner->showSuccess(QStringLiteral("Session ended. Your actual session length has been recorded. Thank "
+                                             "you for releasing the computer."));
     else
         m_banner->showError(QStringLiteral("Could not end the session: ") + r.message);
     emit dataChanged();

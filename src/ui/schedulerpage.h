@@ -40,7 +40,7 @@ signals:
     void scheduleComputed(const labdesk::os::ScheduleResult& result);
 
 private:
-    enum class RowSource { Saved, New, Example };
+    enum class RowSource { Saved, New, Example, Measured };
 
     QWidget* buildWorkloadCard();
     QWidget* buildProcessCard();
@@ -52,6 +52,8 @@ private:
     void loadSelectedWorkload();
     void showSessionDetails(std::optional<qint64> key);
     std::optional<qint64> selectedWorkloadKey() const;
+    bool measuredSelected() const;
+    int loadMeasuredVisits(QString* error);  // fills the table; returns row count
     QString workloadName(std::optional<qint64> key) const;
     void updateWorkloadStatus();
     void onSaveWorkload();
@@ -67,6 +69,9 @@ private:
     void onCellChanged(QTableWidgetItem* item);
     bool readProcesses(std::vector<os::Process>& out);
     void updateTableState();
+    enum class TimeLabels { Abstract, Minutes, Seconds };
+    void setTimeUnit(TimeLabels labels);  // column headings and quantum label show the unit in use
+    void onMeasuredUnitChanged();
 
     // simulation
     void onAlgorithmChanged();
@@ -83,6 +88,8 @@ private:
     MessageBanner* m_workloadStatus = nullptr;
     QPushButton* m_save = nullptr;
     QPushButton* m_revert = nullptr;
+    QWidget* m_timeUnitRow = nullptr;      // shown only for measured lab visits
+    QComboBox* m_timeUnit = nullptr;
 
     QTableWidget* m_input = nullptr;
     QLabel* m_inputState = nullptr;
@@ -108,6 +115,10 @@ private:
     bool m_hasSavedWorkload = false;       // database had rows for m_loadedKey at load time
     QList<qint64> m_savedRowIds;           // process_id values of those rows
     bool m_dirty = false;                  // table differs from what was loaded/saved
+    bool m_loadedMeasured = false;         // table holds the read-only measured lab visits
+    int m_measuredTotal = 0;               // finished visits available when loaded
+    bool m_measuredInSeconds = false;      // unit of the loaded measured values (default minutes)
+    int m_distortedVisits = 0;             // visits changed by >10 % by rounding to the unit
     bool m_populating = false;             // suppresses dirty tracking while filling the table
 };
 

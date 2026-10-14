@@ -23,6 +23,8 @@ from datetime import datetime, timezone, timedelta
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = os.path.join(HERE, "..", "resources", "sql", "schema.sql")
 
+V1_STATEMENTS = 20  # number of statements in schema version 1 (LabDesk 0.5.0 / 0.6.0)
+
 passed = 0
 failed = 0
 
@@ -42,8 +44,8 @@ def ts(offset_s=0):
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
 
 
-def schema_statements():
-    with open(SCHEMA, encoding="utf-8") as f:
+def schema_statements(path=None):
+    with open(path or SCHEMA, encoding="utf-8") as f:
         text = f.read()
     chunks, cur = [], []
     for line in text.splitlines():
@@ -68,11 +70,14 @@ def connect(path):
     return con
 
 
-def apply_schema(con):
+def apply_schema(con, path=None, version=2):
     con.execute("BEGIN IMMEDIATE")
-    for s in schema_statements():
+    statements = schema_statements(path)
+    if version == 1:
+        statements = statements[:V1_STATEMENTS]  # v2 only appended statements, so v1 is the prefix
+    for s in statements:
         con.execute(s)
-    con.execute("PRAGMA user_version = 1")
+    con.execute(f"PRAGMA user_version = {version}")
     con.execute("COMMIT")
 
 
@@ -190,6 +195,202 @@ def status_of(con, cid):
 def count(con, sql, params=()):
     return con.execute(sql, params).fetchone()[0]
 
+# --- mirrors QueueService (queueservice.cpp) ------------------------------------
+PRIORITY = {"EXAM": 1, "ASSIGNMENT": 2, "PRACTICE": 3}
+
+
+def policy(con):
+    row = con.execute("SELECT value FROM lab_setting WHERE setting_key = 'queue_policy'").fetchone()
+    return row[0] if row else "FCFS"
+
+
+def order_key(pol, r):  # r = (request_id, student_id, purpose, priority, expected, requested_at)
+    if pol == "SJF":
+        return (r[4], r[5], r[0])
+    if pol == "PRIORITY":
+        return (r[3], r[5], r[0])
+    return (r[5], r[0])
+
+
+def dispatch_within(con):
+    pol = policy(con)
+    assigned = []
+    while True:
+        free = con.execute("SELECT computer_id FROM computer WHERE status = 'AVAILABLE' "
+                           "ORDER BY computer_id LIMIT 1").fetchone()
+        if not free:
+            return assigned
+        waiting = con.execute(
+            "SELECT r.request_id, r.student_id, r.purpose, r.priority, r.expected_minutes, r.requested_at "
+            "FROM lab_request r JOIN student st ON st.student_id = r.student_id WHERE r.status = 'WAITING' "
+            "AND NOT EXISTS (SELECT 1 FROM session s WHERE s.student_id = r.student_id AND s.status = 'ACTIVE') "
+            "ORDER BY r.request_id").fetchall()
+        if not waiting:
+            return assigned
+        nxt = min(waiting, key=lambda r: order_key(pol, r))
+        now = ts()
+        cur = con.execute("UPDATE computer SET status = 'OCCUPIED' WHERE computer_id = ? AND status = 'AVAILABLE'",
+                          (free[0],))
+        assert cur.rowcount == 1
+        sid = con.execute("INSERT INTO session (student_id, computer_id, start_time, status) VALUES (?, ?, ?, 'ACTIVE')",
+                          (nxt[1], free[0], now)).lastrowid
+        cur = con.execute("UPDATE lab_request SET status = 'ALLOCATED', session_id = ?, allocated_at = ?, granted_by = ? "
+                          "WHERE request_id = ? AND status = 'WAITING'", (sid, now, pol, nxt[0]))
+        assert cur.rowcount == 1
+        assigned.append((nxt[1], free[0]))
+
+
+def join_queue(con, student, purpose, minutes):
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        row = con.execute(
+            "SELECT st.name, (SELECT computer_id FROM session WHERE student_id = st.student_id AND status = 'ACTIVE'),"
+            " (SELECT COUNT(*) FROM lab_request WHERE student_id = st.student_id AND status = 'WAITING') "
+            "FROM student st WHERE st.student_id = ?", (student,)).fetchone()
+        if row is None or row[1] is not None or row[2] > 0:
+            raise RuntimeError("not allowed")
+        waiting = con.execute("SELECT COUNT(*) FROM lab_request WHERE status = 'WAITING'").fetchone()[0]
+        now = ts()
+        if waiting == 0:
+            free = con.execute("SELECT computer_id FROM computer WHERE status = 'AVAILABLE' "
+                               "ORDER BY computer_id LIMIT 1").fetchone()
+            if free:
+                con.execute("UPDATE computer SET status = 'OCCUPIED' WHERE computer_id = ? AND status = 'AVAILABLE'",
+                            (free[0],))
+                sid = con.execute("INSERT INTO session (student_id, computer_id, start_time, status) "
+                                  "VALUES (?, ?, ?, 'ACTIVE')", (student, free[0], now)).lastrowid
+                con.execute("INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at,"
+                            " status, session_id, allocated_at, granted_by) "
+                            "VALUES (?, ?, ?, ?, ?, 'ALLOCATED', ?, ?, 'IMMEDIATE')",
+                            (student, purpose, PRIORITY[purpose], minutes, now, sid, now))
+                con.execute("COMMIT")
+                return "IMMEDIATE", free[0]
+        con.execute("INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at, status) "
+                    "VALUES (?, ?, ?, ?, ?, 'WAITING')", (student, purpose, PRIORITY[purpose], minutes, now))
+        con.execute("COMMIT")
+        return "WAITING", None
+    except (RuntimeError, sqlite3.DatabaseError) as e:
+        con.execute("ROLLBACK")
+        return "REFUSED", str(e)
+
+
+def end_session_with_dispatch(con, student_id):
+    """endSession + dispatchWithin in ONE transaction, as SessionService does."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        sid, cid = con.execute("SELECT session_id, computer_id FROM session WHERE student_id = ? AND status = 'ACTIVE'",
+                               (student_id,)).fetchone()
+        con.execute("UPDATE session SET end_time = ?, status = 'ENDED' WHERE session_id = ? AND status = 'ACTIVE'",
+                    (ts(1), sid))
+        con.execute("UPDATE computer SET status = 'AVAILABLE' WHERE computer_id = ? AND status = 'OCCUPIED'", (cid,))
+        assigned = dispatch_within(con)
+        con.execute("COMMIT")
+        return True, assigned
+    except (TypeError, sqlite3.DatabaseError, AssertionError) as e:
+        con.execute("ROLLBACK")
+        return False, str(e)
+
+
+def queue_section(con):
+    print("Lab queue (schema v2): real arrival, waiting and burst data")
+    check(policy(con) == "FCFS", "default queue policy is FCFS")
+    check(raises(con, "UPDATE lab_setting SET value = 'RR' WHERE setting_key = 'queue_policy'", contains="CHECK"),
+          "unknown queue policy rejected")
+    for sid in ("Q1", "Q2", "Q3", "Q4"):
+        con.execute("INSERT INTO student VALUES (?, ?, ?, 'h', 'CSE')", (sid, "Queue " + sid, sid.lower() + "@uni.edu"))
+    # make exactly one computer free
+    free_now = [r[0] for r in con.execute("SELECT computer_id FROM computer WHERE status='AVAILABLE' ORDER BY 1")]
+    for extra in free_now[1:]:
+        con.execute("UPDATE computer SET status = 'MAINTENANCE' WHERE computer_id = ?", (extra,))
+        con.execute("INSERT INTO maintenance (computer_id, description, reported_at) VALUES (?, 'queue test', ?)",
+                    (extra, ts()))
+    kind, pc = join_queue(con, "Q1", "PRACTICE", 90)
+    check(kind == "IMMEDIATE", "a free computer is granted at once (waiting 0)")
+    r = con.execute("SELECT requested_at, allocated_at, granted_by FROM lab_request WHERE student_id = 'Q1'").fetchone()
+    check(r[0] == r[1] and r[2] == "IMMEDIATE", "immediate grant: arrival = start, granted_by IMMEDIATE")
+    check(join_queue(con, "Q2", "PRACTICE", 60)[0] == "WAITING", "no free computer: request WAITS")
+    check(join_queue(con, "Q3", "ASSIGNMENT", 20)[0] == "WAITING", "second waiting request")
+    check(join_queue(con, "Q4", "EXAM", 45)[0] == "WAITING", "third waiting request")
+    check(join_queue(con, "Q2", "EXAM", 10)[0] == "REFUSED", "a student cannot wait twice")
+    check(raises(con, "INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at) "
+                      "VALUES ('Q2', 'EXAM', 1, 10, ?)", (ts(),), contains="UNIQUE"),
+          "DB: partial unique index allows one WAITING request per student")
+    check(raises(con, "INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at) "
+                      "VALUES ('Q1', 'EXAM', 1, 10, ?)", (ts(),), contains="active session"),
+          "DB trigger: student in a session cannot join the queue")
+    check(raises(con, "INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at) "
+                      "VALUES ('S1', 'EXAM', 3, 10, ?)", (ts(),), contains="CHECK"),
+          "DB: priority must match purpose")
+    check(raises(con, "INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at) "
+                      "VALUES ('S1', 'EXAM', 1, 2, ?)", (ts(),), contains="CHECK"),
+          "DB: expected length below 5 minutes rejected")
+
+    # SJF picks Q3 (20 min) although Q2 arrived first; dispatch happens inside end-session.
+    con.execute("UPDATE lab_setting SET value = 'SJF' WHERE setting_key = 'queue_policy'")
+    ok, assigned = end_session_with_dispatch(con, "Q1")
+    check(ok and assigned == [("Q3", pc)], f"SJF: released computer goes to Q3 in the same transaction ({assigned})")
+    g = con.execute("SELECT granted_by, allocated_at >= requested_at FROM lab_request WHERE student_id='Q3'").fetchone()
+    check(g == ("SJF", 1), "granted_by records the policy; allocated_at >= requested_at")
+
+    # PRIORITY: Q4 (exam) beats Q2 (practice, earlier)
+    con.execute("UPDATE lab_setting SET value = 'PRIORITY' WHERE setting_key = 'queue_policy'")
+    # atomicity: injected failure in the dispatch INSERT rolls back the whole end-session
+    con.execute("CREATE TEMP TRIGGER labdesk_injected_failure BEFORE INSERT ON main.session "
+                "BEGIN SELECT RAISE(ABORT, 'Injected failure'); END")
+    ok, msg = end_session_with_dispatch(con, "Q3")
+    con.execute("DROP TRIGGER temp.labdesk_injected_failure")
+    check(not ok, "dispatch failure aborts the end-session transaction")
+    check(con.execute("SELECT status FROM session WHERE student_id='Q3'").fetchone()[0] == "ACTIVE",
+          "ROLLBACK: Q3's session is still ACTIVE, nothing half-done")
+    check(count(con, "SELECT COUNT(*) FROM lab_request WHERE status='WAITING'") == 2, "ROLLBACK: queue unchanged")
+    ok, assigned = end_session_with_dispatch(con, "Q3")
+    check(ok and assigned and assigned[0][0] == "Q4", "PRIORITY: exam request Q4 served before practice Q2")
+
+    # measured burst / waiting come from timestamps, never typed in
+    row = con.execute("SELECT r.requested_at, s.start_time, s.end_time FROM lab_request r "
+                      "JOIN session s ON s.session_id = r.session_id WHERE r.student_id = 'Q3'").fetchone()
+    check(row[0] <= row[1] <= row[2], "Q3: requested <= started <= ended (waiting and burst measurable)")
+
+    # cancel, history immutability
+    con.execute("UPDATE lab_request SET status = 'CANCELLED', cancelled_at = ? WHERE student_id = 'Q2' "
+                "AND status = 'WAITING'", (ts(1),))
+    check(count(con, "SELECT COUNT(*) FROM lab_request WHERE status='WAITING'") == 0, "Q2 left the queue")
+    check(raises(con, "UPDATE lab_request SET status = 'WAITING', cancelled_at = NULL WHERE student_id = 'Q2'",
+                 contains="history"), "cancelled request cannot be reopened")
+    check(raises(con, "DELETE FROM lab_request", contains="cannot be deleted"), "request history cannot be deleted")
+    check(raises(con, "INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at, status,"
+                      " session_id, allocated_at, granted_by) VALUES ('Q2', 'EXAM', 1, 10, ?, 'ALLOCATED',"
+                      " (SELECT session_id FROM session WHERE student_id = 'Q4' AND status = 'ACTIVE'), ?, 'FCFS')",
+                 (ts(), ts(1)), contains="same student"), "DB trigger: a request cannot point at another student's session")
+    end_session_with_dispatch(con, "Q4")
+    for (mid, cid) in con.execute("SELECT maintenance_id, computer_id FROM maintenance WHERE description='queue test'"):
+        resolve(con, mid)
+
+
+def migration_section():
+    print("Migration: open a version-1 database with the version-2 schema")
+    path = os.path.join(tempfile.mkdtemp(), "v1.db")
+    con = connect(path)
+    apply_schema(con, version=1)
+    v1_tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    check("lab_request" not in v1_tables, "starting point really is a version-1 database")
+    con.execute("INSERT INTO student VALUES ('OLD1','Old','old@uni.edu','h','CSE')")
+    con.execute("INSERT INTO computer (computer_id, computer_name, location) VALUES ('OLDPC','Old PC','Lab Z')")
+    allocate(con, "OLD1", "OLDPC")
+    end_session(con, "OLD1")
+    con.close()
+    con = connect(path)
+    apply_schema(con)  # what Database::open() does on start-up
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    check({"lab_request", "lab_setting"} <= tables, "v1 database gains lab_request and lab_setting")
+    check(count(con, "SELECT COUNT(*) FROM session WHERE student_id='OLD1' AND status='ENDED'") == 1,
+          "existing sessions preserved by the migration")
+    check(count(con, "PRAGMA user_version") == 2, "user_version upgraded to 2")
+    check(policy(con) == "FCFS", "default policy row created")
+    apply_schema(con)
+    check(count(con, "SELECT COUNT(*) FROM lab_setting") == 1, "re-applying the schema does not duplicate settings")
+    con.close()
+
 
 def main():
     tmp = tempfile.mkdtemp()
@@ -198,7 +399,7 @@ def main():
 
     print("Schema")
     apply_schema(con)
-    check(len(schema_statements()) == 20, "schema file splits into 20 statements (5 tables, 7 indexes, 8 triggers)")
+    check(len(schema_statements()) == 30, "schema file splits into 30 statements (v2: +lab_setting, +lab_request, 2 indexes, 5 triggers)")
     apply_schema(con)  # idempotent (IF NOT EXISTS)
     check(True, "schema can be applied twice (idempotent)")
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -374,6 +575,8 @@ def main():
     check(sizes == {-1: 1, active_sid: 2}, f"workload sizes per session ({sizes})")
     end_session(con, "S2")
 
+    queue_section(con)
+
     print("Consistency invariant")
     bad = count(con, """
         SELECT COUNT(*) FROM computer c
@@ -387,8 +590,10 @@ def main():
     con = connect(path)
     apply_schema(con)
     check(count(con, "SELECT COUNT(*) FROM session") == n_sessions, "sessions persisted after reopen")
-    check(count(con, "PRAGMA user_version") == 1, "schema version persisted")
+    check(count(con, "PRAGMA user_version") == 2, "schema version 2 persisted")
     con.close()
+
+    migration_section()
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

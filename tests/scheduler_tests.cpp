@@ -266,6 +266,13 @@ void testValidation()
     check(throws(Algorithm::RoundRobin, {{"P1", 0, 3, 1}}, 0), "RR quantum 0 rejected");
     check(throws(Algorithm::RoundRobin, {{"P1", 0, 3, 1}}, -2), "RR negative quantum rejected");
     check(!throws(Algorithm::FCFS, {{"P1", 0, 3, 1}}, 0), "quantum ignored for non-RR algorithms");
+    // Second-scale real data: an 8-hour burst is valid, but RR with quantum 1 would need 28 800 slices
+    // per process; 3 such processes (86 400) exceed the 50 000-slice limit.
+    const std::vector<Process> longVisits = {{"R1", 0, 28800, 3}, {"R2", 60, 28800, 3}, {"R3", 120, 28800, 3}};
+    check(!throws(Algorithm::FCFS, longVisits, 2), "8-hour bursts in seconds are accepted");
+    check(throws(Algorithm::RoundRobin, longVisits, 1), "RR rejects a quantum that would create too many slices");
+    check(!throws(Algorithm::RoundRobin, longVisits, 60), "RR accepts a sensible quantum on second-scale data");
+    check(throws(Algorithm::FCFS, {{"P1", 0, 86401, 1}}, 2), "burst longer than one day (86 400) rejected");
 }
 
 // Property checks on random workloads: these do not depend on hand calculations.

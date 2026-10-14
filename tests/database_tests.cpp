@@ -273,6 +273,91 @@ int main(int argc, char* argv[])
               "workload sizes per session and for the demo workload");
     }
 
+    std::cout << "Lab queue with real timing data (0.7)\n";
+    {
+        check(s.queue.policy() == lab::Policy::FCFS, "default queue policy is FCFS");
+        for (const char* id : {"S300", "S400", "S500", "S600"}) {
+            const QString sid = QString::fromLatin1(id);
+            s.students.addStudent({sid, QStringLiteral("Student ") + sid, sid.toLower() + QStringLiteral("@uni.edu"),
+                                   QStringLiteral("CSE")},
+                                  QStringLiteral("secret1"));
+        }
+        check(QueueService::validateRequest(QStringLiteral("EXAM"), 30).isEmpty()
+                  && !QueueService::validateRequest(QStringLiteral("GAMING"), 30).isEmpty()
+                  && !QueueService::validateRequest(QStringLiteral("EXAM"), 2).isEmpty(),
+              "request validation: purpose and 5-480 minute range");
+
+        // A computer is free and nobody waits: granted at once, waiting 0.
+        OpResult q = s.queue.joinQueue(QStringLiteral("S100"), QStringLiteral("ASSIGNMENT"), 30);
+        check(q.ok && s.sessions.activeSessionForStudent(QStringLiteral("S100")).has_value(),
+              "free computer granted immediately");
+        check(scalar(*db, QStringLiteral("SELECT COUNT(*) FROM lab_request WHERE student_id = 'S100' AND "
+                                         "granted_by = 'IMMEDIATE' AND requested_at = allocated_at")) == 1,
+              "immediate grant records arrival = start (waiting 0)");
+        q = s.queue.startNow(QStringLiteral("S300"), QStringLiteral("PC-B1"), QStringLiteral("EXAM"), 20);
+        check(q.ok, "startNow on a chosen free computer");
+        check(s.computers.dashboardStats().available == 0, "all computers are now busy");
+
+        // No free computer: requests wait.
+        check(s.queue.joinQueue(QStringLiteral("S400"), QStringLiteral("PRACTICE"), 90).ok
+                  && scalar(*db, QStringLiteral("SELECT COUNT(*) FROM lab_request WHERE student_id = 'S400' "
+                                                "AND status = 'WAITING'")) == 1,
+              "no free computer: S400 waits in the queue");
+        check(s.queue.joinQueue(QStringLiteral("S500"), QStringLiteral("EXAM"), 15).ok, "S500 waits too");
+        check(!s.queue.joinQueue(QStringLiteral("S400"), QStringLiteral("EXAM"), 10).ok, "cannot join the queue twice");
+        check(!s.queue.joinQueue(QStringLiteral("S100"), QStringLiteral("EXAM"), 10).ok,
+              "a student in a session cannot join the queue");
+        q = s.sessions.allocateComputer(QStringLiteral("S600"), QStringLiteral("PC-01"));
+        check(!q.ok && q.message.contains(QStringLiteral("queue")), "direct allocation refused while students wait");
+
+        std::vector<QueueEntry> queue;
+        check(s.queue.waitingQueue(queue) && queue.size() == 2 && queue[0].studentId == "S400",
+              "FCFS: earliest request (S400) is first");
+        check(s.queue.setPolicy(lab::Policy::Priority).ok && s.queue.waitingQueue(queue)
+                  && queue[0].studentId == "S500",
+              "Priority: exam request (S500) moves to the front");
+        int length = 0;
+        const auto entry = s.queue.waitingEntryFor(QStringLiteral("S400"), &length);
+        check(entry && entry->position == 2 && length == 2, "S400 is number 2 of 2");
+
+        // Ending a session hands the computer over inside the same transaction.
+        q = s.sessions.endActiveSession(QStringLiteral("S100"));
+        check(q.ok && q.message.contains(QStringLiteral("S500")), "ending a session serves the next waiting student");
+        const auto s500 = s.sessions.activeSessionForStudent(QStringLiteral("S500"));
+        check(s500 && s500->computerId == "PC-01", "S500 now uses PC-01");
+        check(text(*db, QStringLiteral("SELECT granted_by FROM lab_request WHERE student_id = 'S500'")) == "PRIORITY",
+              "granted_by records the policy that chose the student");
+
+        // A new computer also serves the queue straight away.
+        q = s.computers.addComputer({QStringLiteral("PC-Q1"), QStringLiteral("Queue PC"), QStringLiteral("Lab Q"), {}});
+        check(q.ok && s.sessions.activeSessionForStudent(QStringLiteral("S400")).has_value(),
+              "a newly added computer goes to the waiting student");
+        check(s.queue.waitingQueue(queue) && queue.empty(), "queue is empty");
+
+        check(s.queue.joinQueue(QStringLiteral("S600"), QStringLiteral("PRACTICE"), 30).ok
+                  && s.queue.cancelWaiting(QStringLiteral("S600")).ok,
+              "a student can leave the queue");
+        check(!s.queue.cancelWaiting(QStringLiteral("S600")).ok, "leaving twice is refused");
+
+        // Measured data: arrival <= start <= end, burst comes from the session.
+        std::vector<RequestRecord> history;
+        check(s.queue.history(history) && history.size() == 5, "history lists all 5 requests");
+        bool measured = false;
+        for (const RequestRecord& r : history) {
+            if (r.studentId == "S100")
+                measured = r.status == "ALLOCATED" && !r.endTime.isEmpty() && r.requestedAt <= r.startTime
+                           && r.startTime <= r.endTime;
+        }
+        check(measured, "finished visit has requested <= start <= end (waiting and burst measurable)");
+        {
+            QSqlQuery raw(db->connection());
+            check(!raw.exec(QStringLiteral("DELETE FROM lab_request")), "request history cannot be deleted");
+        }
+        check(s.computers.dashboardStats().waitingRequests == 0, "dashboard: nobody waiting");
+        check(s.computers.consistencyProblems().isEmpty(), "no consistency problems after queue hand-overs");
+        s.queue.setPolicy(lab::Policy::FCFS);
+    }
+
     std::cout << "TEST 13 - persistence after restart\n";
     const int sessionsBefore = scalar(*db, QStringLiteral("SELECT COUNT(*) FROM session"));
     services.reset();

@@ -1,9 +1,11 @@
 #include "sessionservice.h"
 
 #include "database.h"
+#include "queueservice.h"
 #include "timeutil.h"
 
 #include <QSqlQuery>
+#include <QStringList>
 #include <QVariant>
 
 namespace labdesk {
@@ -116,6 +118,29 @@ OpResult SessionService::allocateComputer(const QString& studentIdIn, const QStr
             return wf.fail(reason);
         }
         wf.step(QStringLiteral("  ✓ student has no active session"));
+    }
+
+    // 2b. Queue fairness: while students wait, computers are assigned from the queue.
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral("SELECT (SELECT COUNT(*) FROM lab_request WHERE status = 'WAITING'),"
+                                 "       (SELECT COUNT(*) FROM lab_request WHERE status = 'WAITING' AND student_id = ?)"));
+        q.addBindValue(studentId);
+        wf.step(QStringLiteral("SELECT COUNT(*) FROM lab_request WHERE status = 'WAITING' ..."));
+        if (!q.exec() || !q.next())
+            return wf.fail(QStringLiteral("Could not check the lab queue: ") + q.lastError().text());
+        const int waiting = q.value(0).toInt();
+        const int mine = q.value(1).toInt();
+        q.finish();
+        if (mine > 0)
+            return wf.fail(QStringLiteral("Student %1 is waiting in the lab queue; the next free computer will be "
+                                          "assigned from the queue.")
+                               .arg(studentId));
+        if (waiting > 0)
+            return wf.fail(QStringLiteral("%1 student(s) are waiting in the lab queue, so free computers are assigned "
+                                          "from the queue rather than directly.")
+                               .arg(waiting));
+        wf.step(QStringLiteral("  ✓ nobody is waiting in the lab queue"));
     }
 
     // 3. Computer exists and is AVAILABLE (re-checked inside the transaction)
@@ -260,10 +285,25 @@ OpResult SessionService::endSession(std::optional<qint64> sessionIdIn, const QSt
         wf.step(QStringLiteral("  ✓ computer released (not yet committed)"));
     }
 
-    return wf.commit(QStringLiteral("Session #%1 ended for %2; %3 is AVAILABLE again.")
-                         .arg(sessionId)
-                         .arg(owner, computerId),
-                     sessionId);
+    // 4. Same transaction: give free computers to waiting students (lab queue).
+    QStringList assignments;
+    {
+        QString dispatchError;
+        wf.step(QStringLiteral("Lab queue: assign free computers to waiting students by the current policy"));
+        if (!QueueService::dispatchWithin(db, &assignments, &dispatchError))
+            return wf.fail(QStringLiteral("Could not hand the computer to the next waiting student: ") + dispatchError);
+        if (assignments.isEmpty())
+            wf.step(QStringLiteral("  ✓ nobody is waiting"));
+        for (const QString& a : assignments)
+            wf.step(QStringLiteral("  ✓ ") + a + QStringLiteral(" (not yet committed)"));
+    }
+
+    QString message = QStringLiteral("Session #%1 ended for %2; %3 is AVAILABLE again.")
+                          .arg(sessionId)
+                          .arg(owner, computerId);
+    if (!assignments.isEmpty())
+        message = QStringLiteral("Session #%1 ended for %2. %3.").arg(sessionId).arg(owner, assignments.join(QStringLiteral("; ")));
+    return wf.commit(message, sessionId);
 }
 
 std::optional<SessionRecord> SessionService::findSession(qint64 sessionId, QString* error) const

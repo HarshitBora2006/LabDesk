@@ -4,6 +4,7 @@
 #include "services.h"
 #include "ui/computerspage.h"
 #include "ui/dashboardpage.h"
+#include "ui/labqueuepage.h"
 #include "ui/maintenancepage.h"
 #include "ui/page.h"
 #include "ui/processstatepage.h"
@@ -77,6 +78,7 @@ MainWindow::MainWindow(Database& db, QWidget* parent)
     addPage(QStringLiteral("Computers"), computers);
     addPage(QStringLiteral("Maintenance"), new ui::MaintenancePage(s));
     addPage(QStringLiteral("Sessions and transactions"), new ui::SessionsPage(m_db, s));
+    addPage(QStringLiteral("Lab queue"), new ui::LabQueuePage(s));
     addSection(QStringLiteral("Students"));
     addPage(QStringLiteral("Student portal"), new ui::StudentPortalPage(s));
     addSection(QStringLiteral("Operating systems"));
