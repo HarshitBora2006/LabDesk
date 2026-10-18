@@ -358,6 +358,87 @@ int main(int argc, char* argv[])
         s.queue.setPolicy(lab::Policy::FCFS);
     }
 
+    std::cout << "Administrator accounts (0.8)\n";
+    {
+        const QString pw = QStringLiteral("correct-horse");
+        check(s.admins.adminCount() == 0, "no default administrator exists");
+        check(!s.admins.createFirstAdmin(QStringLiteral("labadmin"), QStringLiteral("Lab Admin"), QStringLiteral("short")).ok,
+              "administrator password needs at least 8 characters");
+        check(s.admins.createFirstAdmin(QStringLiteral("labadmin"), QStringLiteral("Lab Admin"), pw).ok,
+              "first administrator created");
+        check(!s.admins.createFirstAdmin(QStringLiteral("second"), QStringLiteral("Second"), pw).ok,
+              "first-run setup is refused once an administrator exists");
+        check(text(*db, QStringLiteral("SELECT password_hash FROM admin WHERE admin_id = 'labadmin'")) != pw,
+              "administrator password stored as a hash, not plaintext");
+        check(s.admins.authenticate(QStringLiteral("labadmin"), pw).has_value(), "admin login with the right password");
+        check(!s.admins.authenticate(QStringLiteral("labadmin"), QStringLiteral("wrong-password")).has_value(),
+              "admin login with a wrong password is rejected");
+        check(!s.admins.authenticate(QStringLiteral("S100"), QStringLiteral("secret1")).has_value(),
+              "a student cannot sign in as an administrator");
+        check(!s.students.authenticate(QStringLiteral("labadmin"), pw).has_value(),
+              "an administrator account is not a student account");
+        check(s.admins.changePassword(QStringLiteral("labadmin"), pw, QStringLiteral("new-password-1")).ok
+                  && s.admins.authenticate(QStringLiteral("labadmin"), QStringLiteral("new-password-1")).has_value(),
+              "administrator password change");
+        check(s.admins.addAdmin(QStringLiteral("second"), QStringLiteral("Second Admin"), QStringLiteral("another-pass")).ok
+                  && s.admins.adminCount() == 2,
+              "a signed-in administrator can add another administrator");
+    }
+
+    std::cout << "Reports and DBMS introspection (0.8)\n";
+    {
+        std::vector<UsageRow> labs;
+        check(s.reports.usageByLab(labs) && !labs.empty(), "usage by laboratory");
+        int reported = 0;
+        for (const UsageRow& u : labs)
+            reported += u.sessions;
+        check(reported == scalar(*db, QStringLiteral("SELECT COUNT(*) FROM session WHERE status = 'ENDED'")),
+              "usage by laboratory counts every ended session");
+        std::vector<ActivityItem> activity;
+        check(s.reports.recentActivity(5, activity) && activity.size() == 5 && activity[0].time >= activity[4].time,
+              "recent activity: 5 real events, newest first");
+        std::vector<StudentVisit> history;
+        check(s.reports.studentHistory(QStringLiteral("S100"), history) && history.size() >= 2
+                  && history[0].sessionId > history.back().sessionId,
+              "student history lists only that student's sessions, newest first");
+        std::vector<QueueRow> queueRows;
+        check(s.reports.queueByPolicy(queueRows) && !queueRows.empty(), "waiting time by allocation rule");
+
+        DatabaseOverview o;
+        check(s.dbms.overview(o) && o.foreignKeysOn && o.schemaVersion == Database::kSchemaVersion,
+              "overview: foreign keys enforced, schema version 3");
+        bool adminRows = false;
+        for (const TableSummary& t : o.tables)
+            if (t.name == "admin")
+                adminRows = t.rows == 2;
+        check(adminRows, "overview counts the rows of the admin table");
+        std::vector<ColumnInfo> columns;
+        check(s.dbms.columns(QStringLiteral("session"), columns) && columns.size() == 6 && columns[0].primaryKey,
+              "schema: session has 6 columns and session_id is the primary key");
+        std::vector<ForeignKeyInfo> keys;
+        check(s.dbms.foreignKeys(QStringLiteral("session"), keys) && keys.size() == 2, "schema: session has 2 foreign keys");
+        QStringList findings;
+        check(s.dbms.integrityCheck(findings) && findings.join(QLatin1Char(' ')).contains(QStringLiteral("no orphaned rows")),
+              "integrity check: no orphaned rows");
+        QueryResult result;
+        QString err;
+        check(s.dbms.runReadOnly(QStringLiteral("SELECT student_id, password_hash FROM student"), result, &err)
+                  && !result.rows.empty() && result.rows[0][1] == QStringLiteral("(hidden)"),
+              "query console masks password columns");
+        check(!s.dbms.runReadOnly(QStringLiteral("DELETE FROM student"), result, &err), "query console refuses DELETE");
+        check(!s.dbms.runReadOnly(QStringLiteral("SELECT 1; DELETE FROM student"), result, &err),
+              "query console refuses two statements");
+        check(!s.dbms.runReadOnly(QStringLiteral("WITH x AS (SELECT 1) DELETE FROM student WHERE student_id IN "
+                                                 "(SELECT 1 FROM x)"),
+                                  result, &err),
+              "query_only: SQLite refuses a write hidden in a WITH statement");
+        check(s.students.addStudent({QStringLiteral("S900"), QStringLiteral("After Console"), QStringLiteral("s900@uni.edu"),
+                                     QStringLiteral("CSE")},
+                                    QStringLiteral("secret9"))
+                  .ok,
+              "writes work again after the console (query_only switched off)");
+    }
+
     std::cout << "TEST 13 - persistence after restart\n";
     const int sessionsBefore = scalar(*db, QStringLiteral("SELECT COUNT(*) FROM session"));
     services.reset();

@@ -7,17 +7,68 @@
 #include "timeutil.h"
 #include "uihelpers.h"
 
+#include <QFont>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMap>
+#include <QPainter>
+#include <QPen>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 namespace labdesk::ui {
+
+// Ring chart of computer statuses, drawn with QPainter from real counts.
+class StatusDonut : public QWidget {
+public:
+    explicit StatusDonut(QWidget* parent = nullptr) : QWidget(parent) { setFixedSize(170, 170); }
+    void setCounts(int available, int occupied, int maintenance)
+    {
+        m_values[0] = available;
+        m_values[1] = occupied;
+        m_values[2] = maintenance;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF ring = QRectF(rect()).adjusted(14, 14, -14, -14);
+        const int total = m_values[0] + m_values[1] + m_values[2];
+        p.setPen(QPen(QColor("#E2E8F0"), 22, Qt::SolidLine, Qt::FlatCap));
+        p.drawArc(ring, 0, 360 * 16);
+        const QColor colors[] = {QColor("#16A34A"), QColor("#F59E0B"), QColor("#64748B")};
+        int start = 90 * 16;
+        for (int i = 0; i < 3 && total > 0; ++i) {
+            const int span = -qRound(360.0 * 16 * m_values[i] / total);
+            if (span == 0)
+                continue;
+            p.setPen(QPen(colors[i], 22, Qt::SolidLine, Qt::FlatCap));
+            p.drawArc(ring, start, span);
+            start += span;
+        }
+        p.setPen(theme::Text);
+        QFont f = font();
+        f.setPointSizeF(f.pointSizeF() * 1.8);
+        f.setBold(true);
+        p.setFont(f);
+        p.drawText(rect().adjusted(0, -12, 0, -12), Qt::AlignCenter, QString::number(total));
+        f.setPointSizeF(font().pointSizeF());
+        f.setBold(false);
+        p.setFont(f);
+        p.setPen(theme::TextMuted);
+        p.drawText(rect().adjusted(0, 22, 0, 22), Qt::AlignCenter, QStringLiteral("computers"));
+    }
+
+private:
+    int m_values[3] = {0, 0, 0};
+};
 
 namespace {
 QString percent(int part, int whole)
@@ -40,19 +91,52 @@ DashboardPage::DashboardPage(Services& services, QWidget* parent) : Page(parent)
 
     // Headline figures: equal-width cards that reflow with the window width.
     m_stats = new ResponsiveGrid(165, 14);
-    m_stats->setWidgets({makeStat(QStringLiteral("labs"), QStringLiteral("Laboratories")),
+    m_stats->setWidgets({makeStat(QStringLiteral("students"), QStringLiteral("Total students")),
                          makeStat(QStringLiteral("total"), QStringLiteral("Total computers")),
                          makeStat(QStringLiteral("available"), QStringLiteral("Available")),
-                         makeStat(QStringLiteral("occupied"), QStringLiteral("Occupied")),
+                         makeStat(QStringLiteral("occupied"), QStringLiteral("In use")),
                          makeStat(QStringLiteral("maintenance"), QStringLiteral("Under maintenance")),
-                         makeStat(QStringLiteral("sessions"), QStringLiteral("Active sessions")),
-                         makeStat(QStringLiteral("queue"), QStringLiteral("Waiting in queue")),
-                         makeStat(QStringLiteral("occupancy"), QStringLiteral("Lab occupancy"))});
+                         makeStat(QStringLiteral("queue"), QStringLiteral("Waiting in queue"))});
     root->addWidget(m_stats);
 
     m_consistency = new MessageBanner();
     m_consistency->setPersistent(true);
     root->addWidget(m_consistency);
+
+    // Status overview + recent activity
+    auto* overview = new QHBoxLayout();
+    overview->setSpacing(16);
+    QFrame* statusCard = makeCard();
+    cardLayout(statusCard)->addWidget(makeLabel(QStringLiteral("Computer status"), QStringLiteral("sectionTitle")));
+    auto* statusRow = new QHBoxLayout();
+    statusRow->setSpacing(18);
+    m_donut = new StatusDonut();
+    statusRow->addWidget(m_donut, 0, Qt::AlignVCenter);
+    auto* legend = new QVBoxLayout();
+    legend->setSpacing(8);
+    for (const QString& status : {ComputerStatus::Available, ComputerStatus::Occupied, ComputerStatus::Maintenance}) {
+        auto* line = new QHBoxLayout();
+        line->addWidget(makeStatusChip(status, theme::displayStatus(status)));
+        auto* value = makeLabel(QString(), QStringLiteral("fieldLabel"));
+        line->addWidget(value, 1);
+        legend->addLayout(line);
+        m_legend.insert(status, value);
+    }
+    legend->addStretch(1);
+    statusRow->addLayout(legend, 1);
+    cardLayout(statusCard)->addLayout(statusRow);
+    overview->addWidget(statusCard, 2);
+
+    QFrame* activityCard = makeCard();
+    cardLayout(activityCard)->addWidget(makeLabel(QStringLiteral("Recent activity"), QStringLiteral("sectionTitle")));
+    m_activity = new QTableWidget();
+    setupTable(m_activity, {QStringLiteral("Time"), QStringLiteral("Event")});
+    m_activity->setMinimumHeight(200);
+    cardLayout(activityCard)->addWidget(m_activity, 1);
+    m_activityState = makeStateMessage();
+    cardLayout(activityCard)->addWidget(m_activityState);
+    overview->addWidget(activityCard, 3);
+    root->addLayout(overview);
 
     // Laboratories section
     auto* labHeader = new QHBoxLayout();
@@ -60,9 +144,8 @@ DashboardPage::DashboardPage(Services& services, QWidget* parent) : Page(parent)
     auto* labTitles = new QVBoxLayout();
     labTitles->setSpacing(2);
     labTitles->addWidget(makeLabel(QStringLiteral("Laboratories"), QStringLiteral("sectionTitle")));
-    labTitles->addWidget(makeLabel(QStringLiteral("Each laboratory is a distinct computer location. Occupancy = "
-                                                  "occupied computers / all computers in that laboratory."),
-                                   QStringLiteral("caption")));
+    m_labsCaption = makeLabel(QString(), QStringLiteral("caption"));
+    labTitles->addWidget(m_labsCaption);
     labHeader->addLayout(labTitles, 1);
     labHeader->addWidget(makeStatusChip(ComputerStatus::Available, QStringLiteral("Available")), 0, Qt::AlignBottom);
     labHeader->addWidget(makeStatusChip(ComputerStatus::Occupied, QStringLiteral("Occupied")), 0, Qt::AlignBottom);
@@ -125,18 +208,24 @@ void DashboardPage::refresh()
         for (const QString& key : m_statValues.keys())
             setStat(key, QStringLiteral("-"), QStringLiteral("unavailable"));
     } else {
-        setStat(QStringLiteral("labs"), QString::number(s.laboratories), QStringLiteral("distinct locations"));
-        setStat(QStringLiteral("total"), QString::number(s.totalComputers), QStringLiteral("in the inventory"));
+        setStat(QStringLiteral("students"), QString::number(s.students), QStringLiteral("registered"));
+        setStat(QStringLiteral("total"), QString::number(s.totalComputers),
+                QStringLiteral("in %1 laborator%2").arg(s.laboratories).arg(s.laboratories == 1 ? QStringLiteral("y") : QStringLiteral("ies")));
         setStat(QStringLiteral("available"), QString::number(s.available), QStringLiteral("ready for students"));
-        setStat(QStringLiteral("occupied"), QString::number(s.occupied), QStringLiteral("in use right now"));
+        setStat(QStringLiteral("occupied"), QString::number(s.occupied),
+                QStringLiteral("%1 occupancy").arg(percent(s.occupied, s.totalComputers)));
         setStat(QStringLiteral("maintenance"), QString::number(s.maintenance),
                 QStringLiteral("%1 open issue(s)").arg(s.openMaintenance));
-        setStat(QStringLiteral("sessions"), QString::number(s.activeSessions),
-                QStringLiteral("%1 student(s) registered").arg(s.students));
         setStat(QStringLiteral("queue"), QString::number(s.waitingRequests),
                 QStringLiteral("policy: %1").arg(QString::fromLatin1(lab::policyCode(m_services.queue.policy()))));
-        setStat(QStringLiteral("occupancy"), percent(s.occupied, s.totalComputers),
-                QStringLiteral("%1 of %2 computers in use").arg(s.occupied).arg(s.totalComputers));
+        m_donut->setCounts(s.available, s.occupied, s.maintenance);
+        m_legend.value(ComputerStatus::Available)->setText(QStringLiteral("%1 (%2)").arg(s.available).arg(percent(s.available, s.totalComputers)));
+        m_legend.value(ComputerStatus::Occupied)->setText(QStringLiteral("%1 (%2)").arg(s.occupied).arg(percent(s.occupied, s.totalComputers)));
+        m_legend.value(ComputerStatus::Maintenance)->setText(QStringLiteral("%1 (%2)").arg(s.maintenance).arg(percent(s.maintenance, s.totalComputers)));
+        m_labsCaption->setText(QStringLiteral("%1 laborator%2 (each is a distinct computer location). Occupancy = "
+                                              "computers in use / all computers in that laboratory.")
+                                   .arg(s.laboratories)
+                                   .arg(s.laboratories == 1 ? QStringLiteral("y") : QStringLiteral("ies")));
     }
 
     QString consistencyError;
@@ -156,7 +245,33 @@ void DashboardPage::refresh()
     for (const SessionRecord& r : m_services.sessions.listSessions(true, 1000, &sessionError))
         usedBy.insert(r.computerId, QStringLiteral("%1 (%2)").arg(r.studentName, r.studentId));
     refreshLabs(usedBy);
+    refreshActivity();
     refreshActiveSessions();
+}
+
+void DashboardPage::refreshActivity()
+{
+    std::vector<ActivityItem> items;
+    QString error;
+    const bool ok = m_services.reports.recentActivity(8, items, &error);
+    m_activity->setRowCount(static_cast<int>(items.size()));
+    for (int row = 0; row < static_cast<int>(items.size()); ++row) {
+        const ActivityItem& a = items[static_cast<std::size_t>(row)];
+        m_activity->setItem(row, 0, makeItem(timeutil::toDisplay(a.time)));
+        m_activity->setItem(row, 1, makeItem(a.text));
+    }
+    m_activity->resizeColumnsToContents();
+    if (!ok) {
+        m_activity->hide();
+        showErrorState(m_activityState, error);
+    } else if (items.empty()) {
+        m_activity->hide();
+        showEmptyState(m_activityState, QStringLiteral("No activity yet. Sessions, maintenance reports and queue "
+                                                       "requests appear here as they happen."));
+    } else {
+        m_activity->show();
+        m_activityState->hide();
+    }
 }
 
 QWidget* DashboardPage::makeLabCard(const LabSummary& lab, const QList<Computer>& computers,
@@ -207,7 +322,7 @@ QWidget* DashboardPage::makeLabCard(const LabSummary& lab, const QList<Computer>
     for (const Computer& c : computers) {
         const auto colors = theme::statusColors(c.status);
         auto* tile = new QLabel(QStringLiteral("<b>%1</b><br>%2")
-                                    .arg(c.computerId.toHtmlEscaped(), c.status.left(1) + c.status.mid(1).toLower()));
+                                    .arg(c.computerId.toHtmlEscaped(), theme::displayStatus(c.status).toHtmlEscaped()));
         tile->setTextFormat(Qt::RichText);
         tile->setAlignment(Qt::AlignCenter);
         tile->setFixedSize(96, 46);

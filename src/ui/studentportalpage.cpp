@@ -7,74 +7,29 @@
 
 #include <QComboBox>
 #include <QFont>
-#include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
-#include <QStackedWidget>
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
 namespace labdesk::ui {
 
-StudentPortalPage::StudentPortalPage(Services& services, QWidget* parent) : Page(parent), m_services(services)
+StudentPortalPage::StudentPortalPage(Services& services, const QString& studentId, QWidget* parent)
+    : Page(parent), m_services(services), m_studentId(studentId)
 {
     setObjectName(QStringLiteral("pageRoot"));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
-    m_stack = new QStackedWidget();
-    m_stack->setObjectName(QStringLiteral("pageStack"));
-    m_stack->addWidget(buildLogin());
-    m_stack->addWidget(buildDashboard());
-    root->addWidget(m_stack);
+    root->addWidget(buildDashboard());
 
     m_clock = new QTimer(this);
     m_clock->setInterval(1000);
     connect(m_clock, &QTimer::timeout, this, &StudentPortalPage::updateElapsed);
-}
-
-QWidget* StudentPortalPage::buildLogin()
-{
-    auto* page = new QWidget();
-    QVBoxLayout* outer = makePageLayout(page, QStringLiteral("Student portal"),
-                                        QStringLiteral("Sign in to request a lab computer or end your session."));
-    auto* centre = new QHBoxLayout();
-    centre->addStretch();
-    QFrame* card = makeCard();
-    card->setFixedWidth(380);
-    QVBoxLayout* box = cardLayout(card);
-    box->setSpacing(12);
-    box->addWidget(makeLabel(QStringLiteral("Sign in"), QStringLiteral("sectionTitle")));
-    m_loginBanner = new MessageBanner();
-    box->addWidget(m_loginBanner);
-    auto* form = new QFormLayout();
-    form->setVerticalSpacing(10);
-    m_loginId = new QLineEdit();
-    m_loginId->setPlaceholderText(QStringLiteral("Your student ID"));
-    m_loginPassword = new QLineEdit();
-    m_loginPassword->setEchoMode(QLineEdit::Password);
-    form->addRow(QStringLiteral("Student ID"), m_loginId);
-    form->addRow(QStringLiteral("Password"), m_loginPassword);
-    box->addLayout(form);
-    auto* signIn = makeButton(QStringLiteral("Sign in"), QStringLiteral("primary"));
-    box->addWidget(signIn);
-    box->addWidget(makeLabel(QStringLiteral("Demo accounts: DEMO01 to DEMO04, password demo123."),
-                             QStringLiteral("muted")));
-    centre->addWidget(card);
-    centre->addStretch();
-    outer->addSpacing(30);
-    outer->addLayout(centre);
-    outer->addStretch();
-
-    connect(signIn, &QPushButton::clicked, this, &StudentPortalPage::onSignIn);
-    connect(m_loginPassword, &QLineEdit::returnPressed, this, &StudentPortalPage::onSignIn);
-    connect(m_loginId, &QLineEdit::returnPressed, this, [this]() { m_loginPassword->setFocus(); });
-    return page;
 }
 
 QWidget* StudentPortalPage::buildDashboard()
@@ -93,8 +48,6 @@ QWidget* StudentPortalPage::buildDashboard()
     titles->addWidget(m_welcome);
     titles->addWidget(m_identity);
     header->addLayout(titles, 1);
-    auto* signOut = makeButton(QStringLiteral("Sign out"));
-    header->addWidget(signOut, 0, Qt::AlignTop);
     root->addLayout(header);
 
     m_banner = new MessageBanner();
@@ -183,7 +136,6 @@ QWidget* StudentPortalPage::buildDashboard()
     root->addWidget(requestCard);
     root->addStretch(1);
 
-    connect(signOut, &QPushButton::clicked, this, &StudentPortalPage::onSignOut);
     connect(m_endSession, &QPushButton::clicked, this, &StudentPortalPage::onEndSession);
     connect(m_leaveQueue, &QPushButton::clicked, this, &StudentPortalPage::onLeaveQueue);
     connect(m_startNow, &QPushButton::clicked, this, &StudentPortalPage::onStartNow);
@@ -191,31 +143,6 @@ QWidget* StudentPortalPage::buildDashboard()
     connect(m_available, &QTableWidget::itemSelectionChanged, this, &StudentPortalPage::updateRequestControls);
     connect(m_available, &QTableWidget::itemDoubleClicked, this, [this]() { onStartNow(); });
     return page;
-}
-
-void StudentPortalPage::onSignIn()
-{
-    QString error;
-    const auto student = m_services.students.authenticate(m_loginId->text(), m_loginPassword->text(), &error);
-    m_loginPassword->clear();
-    if (!student) {
-        m_loginBanner->showError(error);
-        return;
-    }
-    m_loginBanner->clearMessage();
-    m_studentId = student->studentId;
-    m_banner->clearMessage();
-    m_stack->setCurrentIndex(1);
-    refresh();
-}
-
-void StudentPortalPage::onSignOut()
-{
-    m_studentId.clear();
-    m_timerStart.clear();
-    m_clock->stop();
-    m_loginId->clear();
-    m_stack->setCurrentIndex(0);
 }
 
 QString StudentPortalPage::selectedPurpose() const
@@ -230,12 +157,12 @@ void StudentPortalPage::refresh()
 
     const auto student = m_services.students.findStudent(m_studentId);
     if (!student) {
-        onSignOut();
-        m_loginBanner->showError(QStringLiteral("Your account is no longer available. Contact the lab admin."));
+        m_banner->showError(QStringLiteral("Your account is no longer available. Contact the lab administrator."));
+        m_requestBody->setEnabled(false);
         return;
     }
-    m_welcome->setText(QStringLiteral("Hello, %1").arg(student->name));
-    m_identity->setText(QStringLiteral("Student ID %1, %2").arg(student->studentId, student->department));
+    m_welcome->setText(QStringLiteral("My session"));
+    m_identity->setText(QStringLiteral("%1, student ID %2, %3").arg(student->name, student->studentId, student->department));
 
     // ---- current visit: in a session, waiting in the queue, or neither
     QString sessionError;

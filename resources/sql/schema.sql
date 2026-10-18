@@ -1,5 +1,8 @@
 -- =====================================================================
--- LabDesk database schema (schema version 2)
+-- LabDesk database schema (schema version 3)
+--
+-- Version 3 (LabDesk 0.8.0) ADDS the admin table (administrator accounts with
+-- salted password hashes). Additive again: older databases simply gain it.
 --
 -- Version 2 (LabDesk 0.7.0) ADDS lab_setting and lab_request plus their
 -- indexes and triggers. Nothing existing is altered, so opening a version-1
@@ -237,3 +240,16 @@ BEFORE DELETE ON lab_request
 BEGIN
     SELECT RAISE(ABORT, 'Request history cannot be deleted');
 END;
+-- @@
+-- =====================================================================
+-- Version 3: administrator accounts. Passwords are stored only as salted
+-- hashes (passwordhasher.cpp). No default administrator is created: the
+-- first administrator is created on the login screen when none exists.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS admin (
+    admin_id      TEXT NOT NULL PRIMARY KEY
+                  CHECK (length(admin_id) BETWEEN 2 AND 20 AND admin_id = trim(admin_id)),
+    name          TEXT NOT NULL CHECK (length(trim(name)) > 0),
+    password_hash TEXT NOT NULL CHECK (length(password_hash) > 0),
+    created_at    TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*Z')
+);

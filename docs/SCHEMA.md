@@ -1,10 +1,15 @@
-# LabDesk database schema (version 2)
+# LabDesk database schema (version 3)
 
 The single source of truth is [`resources/sql/schema.sql`](../resources/sql/schema.sql).
 It is embedded in the application and applied on every start: all statements
 use `IF NOT EXISTS`, so applying the schema again is a no-op. The version is
 stored in `PRAGMA user_version` (currently 1).
 
+> **Version 3 (LabDesk 0.8.0)** adds `admin` (administrator accounts:
+> `admin_id` PK, `name`, `password_hash`, `created_at`, each with CHECK
+> constraints). There is no default row; the first administrator is created
+> on the login screen. The migration is additive like the earlier ones.
+>
 > **Version 2 (LabDesk 0.7.0)** adds `lab_setting` and `lab_request` (see
 > [Lab queue tables](#lab-queue-tables-version-2)). The migration is purely
 > additive: on start-up `Database::open()` runs every `CREATE … IF NOT
@@ -60,6 +65,12 @@ erDiagram
         TEXT reported_at
         TEXT resolved_at "NULL while OPEN"
         TEXT status "OPEN | RESOLVED"
+    }
+    ADMIN {
+        TEXT admin_id PK
+        TEXT name
+        TEXT password_hash "salted hash"
+        TEXT created_at
     }
     LAB_REQUEST {
         INTEGER request_id PK "AUTOINCREMENT"

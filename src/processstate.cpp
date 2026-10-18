@@ -95,8 +95,69 @@ std::string LifecycleSimulator::createProcess()
     } while (find(id));  // skip ids already used, e.g. ones loaded from a workload
     SimulatedProcess p;
     p.id = id;
+    p.pid = m_nextPid++;
+    p.name = id;
+    p.arrival = m_clock;
     m_processes.push_back(p);
     return id;
+}
+
+SimulatedProcess* LifecycleSimulator::findMutable(const std::string& id)
+{
+    auto it = std::find_if(m_processes.begin(), m_processes.end(),
+                           [&](const SimulatedProcess& p) { return p.id == id; });
+    return it == m_processes.end() ? nullptr : &*it;
+}
+
+void LifecycleSimulator::record(SimulatedProcess& p, ProcessState to, const std::string& reason)
+{
+    m_events.push_back({m_clock, p.id, p.state, to, reason});
+    p.state = to;
+    ++p.transitions;
+}
+
+int LifecycleSimulator::addProcess(const std::string& name, int priority, int burst, std::string* error)
+{
+    auto fail = [&](const std::string& message) {
+        if (error)
+            *error = message;
+        return -1;
+    };
+    if (name.empty() || name.size() > 32)
+        return fail("Give the simulated process a name of 1 to 32 characters.");
+    if (priority < 0 || priority > 99)
+        return fail("Priority must be between 0 and 99 (lower number = higher priority).");
+    if (burst < 1 || burst > 1000)
+        return fail("Burst time must be between 1 and 1000 time units.");
+    SimulatedProcess p;
+    p.pid = m_nextPid++;
+    p.id = std::to_string(p.pid);
+    p.name = name;
+    p.priority = priority;
+    p.arrival = m_clock;
+    p.burst = burst;
+    p.remaining = burst;
+    m_processes.push_back(p);
+    return p.pid;
+}
+
+bool LifecycleSimulator::runTick(std::string* error)
+{
+    auto it = std::find_if(m_processes.begin(), m_processes.end(),
+                           [](const SimulatedProcess& p) { return p.state == ProcessState::Running; });
+    if (it == m_processes.end()) {
+        if (error)
+            *error = "The CPU is idle: dispatch a READY process before running a time unit.";
+        return false;
+    }
+    ++m_clock;
+    ++it->cpuTime;
+    if (it->burst > 0) {
+        --it->remaining;
+        if (it->remaining == 0)
+            record(*it, ProcessState::Terminated, "Burst complete");
+    }
+    return true;
 }
 
 bool LifecycleSimulator::createProcess(const std::string& id, std::string* error)
@@ -114,6 +175,9 @@ bool LifecycleSimulator::createProcess(const std::string& id, std::string* error
         return fail("A process called " + id + " already exists.");
     SimulatedProcess p;
     p.id = id;
+    p.pid = m_nextPid++;
+    p.name = id;
+    p.arrival = m_clock;
     m_processes.push_back(p);
     return true;
 }
@@ -159,9 +223,12 @@ bool LifecycleSimulator::apply(const std::string& processId, ProcessState to, st
         }
     }
 
-    it->state = to;
-    ++it->transitions;
-    m_events.push_back({m_clock, processId, from, to, transitionName(from, to)});
+    if (to == ProcessState::Terminated && it->burst > 0 && it->remaining > 0) {
+        // Allowed by the diagram (RUNNING -> TERMINATED): the process is ended early.
+        record(*it, to, "Terminated before its burst finished (" + std::to_string(it->remaining) + " unit(s) left)");
+    } else {
+        record(*it, to, transitionName(from, to));
+    }
     ++m_clock;
     return true;
 }
@@ -172,6 +239,7 @@ void LifecycleSimulator::reset()
     m_events.clear();
     m_clock = 0;
     m_nextNumber = 1;
+    m_nextPid = 1001;
 }
 
 }  // namespace labdesk::os

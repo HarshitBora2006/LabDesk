@@ -20,9 +20,9 @@ namespace labdesk::ui {
 
 class MessageBanner;
 
-// Student-facing portal. Nothing beyond the sign-in form is reachable until
-// StudentService::authenticate() succeeds; every action uses the signed-in
-// student's ID, never an ID typed into the dashboard.
+// Student "My Session" page. It is only created after the login screen has
+// authenticated the student; every action uses that student's ID, never an ID
+// typed into the page.
 //
 // Every visit starts with a request (purpose + expected length), so the lab
 // queue records real arrival times. The student either starts on a free
@@ -31,14 +31,11 @@ class MessageBanner;
 class StudentPortalPage : public Page {
     Q_OBJECT
 public:
-    StudentPortalPage(Services& services, QWidget* parent = nullptr);
+    StudentPortalPage(Services& services, const QString& studentId, QWidget* parent = nullptr);
     void refresh() override;
 
 private:
-    QWidget* buildLogin();
     QWidget* buildDashboard();
-    void onSignIn();
-    void onSignOut();
     void onStartNow();
     void onJoinQueue();
     void onLeaveQueue();
@@ -48,13 +45,9 @@ private:
     QString selectedPurpose() const;
 
     Services& m_services;
-    QStackedWidget* m_stack = nullptr;
 
-    QLineEdit* m_loginId = nullptr;
-    QLineEdit* m_loginPassword = nullptr;
-    MessageBanner* m_loginBanner = nullptr;
 
-    QString m_studentId;     // set only after successful authentication
+    QString m_studentId;     // the authenticated student
     QString m_timerStart;    // session start or queue arrival (UTC ISO), empty if neither
     QString m_timerPrefix;   // "Time at the computer" / "Waiting for"
     bool m_inSession = false;

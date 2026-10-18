@@ -17,6 +17,7 @@ namespace labdesk::ui {
 
 class MessageBanner;
 class ResponsiveGrid;
+class StatusDonut;
 
 class DashboardPage : public Page {
     Q_OBJECT
@@ -35,6 +36,7 @@ private:
                          const QHash<QString, QString>& usedBy);
     void refreshLabs(const QHash<QString, QString>& usedBy);
     void refreshActiveSessions();
+    void refreshActivity();
 
     Services& m_services;
     MessageBanner* m_banner = nullptr;
@@ -44,6 +46,11 @@ private:
     QHash<QString, QLabel*> m_statCaptions;
     ResponsiveGrid* m_labs = nullptr;
     QLabel* m_labsState = nullptr;
+    StatusDonut* m_donut = nullptr;
+    QHash<QString, QLabel*> m_legend;
+    QTableWidget* m_activity = nullptr;
+    QLabel* m_activityState = nullptr;
+    QLabel* m_labsCaption = nullptr;
     QTableWidget* m_activeTable = nullptr;
     QLabel* m_activeState = nullptr;
 };

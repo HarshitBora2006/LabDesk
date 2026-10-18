@@ -31,6 +31,9 @@ public:
     void refresh() override;
 
 private:
+    QWidget* buildAllocateCard();
+    void reloadAllocateChoices();
+    void onAllocate();
     QWidget* buildPolicyCard();
     QWidget* buildQueueCard();
     QWidget* buildMeasuredCard();
@@ -45,6 +48,10 @@ private:
     Services& m_services;
     MessageBanner* m_banner = nullptr;
 
+    QComboBox* m_allocStudent = nullptr;
+    QComboBox* m_allocComputer = nullptr;
+    QComboBox* m_allocPurpose = nullptr;
+    QSpinBox* m_allocMinutes = nullptr;
     QComboBox* m_policy = nullptr;
     QLabel* m_policyHelp = nullptr;
     QLabel* m_currentPolicy = nullptr;

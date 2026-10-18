@@ -370,17 +370,22 @@ void SchedulerPage::refresh()
     m_workload->addItem(QStringLiteral("Demo workload, not linked to a session (%1)")
                             .arg(describe(ProcessService::kUnlinkedKey)),
                         kDemoKey);
-    std::vector<RequestRecord> requests;
-    QString requestError;
     int finished = 0;
-    if (m_services.queue.history(requests, &requestError)) {
-        for (const RequestRecord& r : requests)
-            if (!r.startTime.isEmpty() && !r.endTime.isEmpty())
-                ++finished;
+    if (m_studentScope.isEmpty()) {
+        std::vector<RequestRecord> requests;
+        QString requestError;
+        if (m_services.queue.history(requests, &requestError)) {
+            for (const RequestRecord& r : requests)
+                if (!r.startTime.isEmpty() && !r.endTime.isEmpty())
+                    ++finished;
+        }
+        m_workload->addItem(
+            QStringLiteral("Measured lab visits, real data, read-only (%1 finished visit(s))").arg(finished),
+            kMeasuredKey);
     }
-    m_workload->addItem(QStringLiteral("Measured lab visits, real data, read-only (%1 finished visit(s))").arg(finished),
-                        kMeasuredKey);
     for (const SessionRecord& s : sessions) {
+        if (!m_studentScope.isEmpty() && s.studentId != m_studentScope)
+            continue;  // students only see their own sessions
         m_workload->addItem(QStringLiteral("Session #%1: %2 on %3, %4 (%5)")
                                 .arg(s.sessionId)
                                 .arg(s.studentId, s.computerId, s.status.toLower(), describe(s.sessionId)),
@@ -406,6 +411,13 @@ void SchedulerPage::refresh()
 bool SchedulerPage::measuredSelected() const
 {
     return m_workload->currentData().toLongLong() == kMeasuredKey;
+}
+
+void SchedulerPage::setStudentScope(const QString& studentId)
+{
+    m_studentScope = studentId;
+    m_save->hide();
+    m_revert->setText(QStringLiteral("Reload"));
 }
 
 std::optional<qint64> SchedulerPage::selectedWorkloadKey() const
@@ -616,6 +628,20 @@ void SchedulerPage::updateWorkloadStatus()
         return;
     }
     m_save->setToolTip(QString());
+    if (!m_studentScope.isEmpty()) {
+        if (m_dirty)
+            m_workloadStatus->showWarning(QStringLiteral("You changed the processes. Edits are for your simulation "
+                                                         "only and are not saved; press Reload to restore."));
+        else if (m_hasSavedWorkload)
+            m_workloadStatus->showInfo(QStringLiteral("Loaded %1 saved process(es) from the database. You can edit "
+                                                      "and run them; only administrators can save workloads.")
+                                           .arg(static_cast<int>(m_savedRowIds.size())));
+        else
+            m_workloadStatus->showInfo(QStringLiteral("Nothing saved for this selection. Add processes or use the "
+                                                      "textbook example to run a simulation."));
+        m_revert->setEnabled(m_dirty);
+        return;
+    }
     const QString name = workloadName(m_loadedKey);
     const QString capitalName = name.left(1).toUpper() + name.mid(1);
     if (m_dirty) {
@@ -657,6 +683,10 @@ void SchedulerPage::markDirty()
 
 void SchedulerPage::onSaveWorkload()
 {
+    if (!m_studentScope.isEmpty()) {
+        m_banner->showWarning(QStringLiteral("Only administrators can save workloads to the database."));
+        return;
+    }
     if (m_loadedMeasured) {
         m_banner->showWarning(QStringLiteral("Measured lab visits are read-only. Choose a session or the demo workload "
                                              "to save simulation inputs."));

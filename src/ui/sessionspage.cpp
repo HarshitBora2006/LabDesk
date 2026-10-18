@@ -13,7 +13,6 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
-#include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -21,19 +20,21 @@
 
 namespace labdesk::ui {
 
-SessionsPage::SessionsPage(Database& db, Services& services, QWidget* parent)
-    : Page(parent), m_db(db), m_services(services)
+SessionsPage::SessionsPage(Database& db, Services& services, Mode mode, QWidget* parent)
+    : Page(parent), m_db(db), m_services(services), m_mode(mode)
 {
+    const bool history = mode == Mode::History;
     QVBoxLayout* root = makePageLayout(
-        this, QStringLiteral("Sessions and transactions"),
-        QStringLiteral("Every allocation and every session end is a single database transaction."));
+        this, history ? QStringLiteral("Usage logs") : QStringLiteral("Transactions and integrity"),
+        history ? QStringLiteral("Every lab session ever started, newest first. Ended sessions are permanent history.")
+                : QStringLiteral("Allocation and session end are single SQLite transactions. Run them here step by "
+                                 "step and watch COMMIT or ROLLBACK."));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
-
-    auto* tabs = new QTabWidget();
-    tabs->addTab(buildHistoryTab(), QStringLiteral("Session history"));
-    tabs->addTab(buildTransactionTab(), QStringLiteral("Transaction demonstration"));
-    root->addWidget(tabs, 1);
+    QFrame* card = makeCard();
+    cardLayout(card)->setContentsMargins(0, 0, 0, 0);
+    cardLayout(card)->addWidget(history ? buildHistoryTab() : buildTransactionTab());
+    root->addWidget(card, 1);
 }
 
 QWidget* SessionsPage::buildHistoryTab()
@@ -58,9 +59,9 @@ QWidget* SessionsPage::buildHistoryTab()
     layout->addWidget(m_table, 1);
     m_empty = makeStateMessage();
     layout->addWidget(m_empty);
-    layout->addWidget(makeLabel(QStringLiteral("Ended sessions are kept permanently; the database rejects any "
+    layout->addWidget(makeLabel(QStringLiteral("Ended sessions are kept permanently: database triggers reject any "
                                                "attempt to modify or delete them."),
-                                QStringLiteral("muted")));
+                                QStringLiteral("caption")));
 
     connect(m_activeOnly, &QCheckBox::toggled, this, [this]() { reloadHistory(); });
     connect(m_table, &QTableWidget::itemSelectionChanged, this, [this]() {
@@ -68,7 +69,7 @@ QWidget* SessionsPage::buildHistoryTab()
         const auto items = m_table->selectedItems();
         if (!items.isEmpty()) {
             const QTableWidgetItem* status = m_table->item(items.first()->row(), 7);
-            active = status && status->text() == SessionStatus::Active;
+            active = rawStatus(status) == SessionStatus::Active;
         }
         m_endSelected->setEnabled(active);
     });
@@ -85,13 +86,13 @@ QWidget* SessionsPage::buildTransactionTab()
     auto* layout = new QVBoxLayout(tab);
     layout->setContentsMargins(14, 14, 14, 14);
     layout->setSpacing(10);
-    layout->addWidget(makeLabel(
+    layout->addWidget(makeExplainer(
         QStringLiteral("Runs the same SessionService code the student portal uses and prints each step. "
                        "Bound values are shown inline for readability; the real statements use prepared "
                        "placeholders (?). Turn on the injected failure to make the session INSERT fail after "
                        "the computer UPDATE has already run, then check that ROLLBACK left the computer "
-                       "AVAILABLE."),
-        QStringLiteral("muted")));
+                       "AVAILABLE. Integrity rules also live in the database itself: foreign keys, CHECK "
+                       "constraints, partial unique indexes and triggers (see Schema and Relationships).")));
 
     auto* controls = new QHBoxLayout();
     m_demoStudent = new QComboBox();
@@ -134,8 +135,10 @@ QWidget* SessionsPage::buildTransactionTab()
 
 void SessionsPage::refresh()
 {
-    reloadHistory();
-    reloadDemoChoices();
+    if (m_mode == Mode::History)
+        reloadHistory();
+    else
+        reloadDemoChoices();
 }
 
 void SessionsPage::reloadHistory()

@@ -6,8 +6,10 @@
 
 #include <vector>
 
+class QComboBox;
 class QLabel;
 class QPushButton;
+class QSpinBox;
 class QSlider;
 class QTableWidget;
 
@@ -46,6 +48,9 @@ private:
     void onProcessSelected();
     void applyTransition(os::ProcessState from, os::ProcessState to);
     void createFromSchedule();
+    void onAddProcess();
+    void onRunTick();
+    void selectProcess(const std::string& id);
     QString selectedProcess() const;
     void updateSnapshot(int time);
 
@@ -61,6 +66,10 @@ private:
     QLabel* m_lastAction = nullptr;
     QLabel* m_cpuStatus = nullptr;
     QPushButton* m_fromSchedule = nullptr;
+    QComboBox* m_newName = nullptr;
+    QSpinBox* m_newPriority = nullptr;
+    QSpinBox* m_newBurst = nullptr;
+    QPushButton* m_runTick = nullptr;
     std::vector<ActionButton> m_actions;  // one button per textbook transition
 
     // trace

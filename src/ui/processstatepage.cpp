@@ -3,6 +3,7 @@
 #include "statediagramwidget.h"
 #include "uihelpers.h"
 
+#include <QComboBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -10,6 +11,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -51,13 +53,13 @@ QWidget* makeTabPage()
 ProcessStatePage::ProcessStatePage(QWidget* parent) : Page(parent)
 {
     QWidget* body = makeScrollPage(this);
-    QVBoxLayout* root = makePageLayout(body, QStringLiteral("Process states"),
-                                       QStringLiteral("How a process moves through operating-system states."));
+    QVBoxLayout* root = makePageLayout(body, QStringLiteral("Process Management"),
+                                       QStringLiteral("Simulated Processes - Educational OS Demonstration"));
     root->addWidget(makeExplainer(QStringLiteral(
-        "This simulator demonstrates how a process moves through operating-system states during its lifecycle. You "
-        "can create a process, admit it to the ready queue, dispatch it to the CPU, block it for I/O, return it to "
-        "the ready queue, and terminate it. It is an educational simulation with one simulated CPU; it does not show "
-        "or control real Windows processes, and it is unrelated to the status of lab computers.")));
+        "Create simulated processes and move them through the operating-system states: admit, dispatch to the CPU, "
+        "run, block for I/O, complete the I/O, preempt and terminate. Names such as chrome.exe are sample labels for "
+        "SIMULATED processes. LabDesk does not read, start or stop real Windows processes, and a student's lab "
+        "session is a database record, not a process.")));
 
     auto* tabs = new QTabWidget();
     tabs->addTab(buildSimulatorTab(), QStringLiteral("Lifecycle simulator"));
@@ -100,25 +102,45 @@ QWidget* ProcessStatePage::buildSimulatorTab()
     auto* left = new QVBoxLayout();
     left->setSpacing(10);
     left->addWidget(makeLabel(QStringLiteral("Processes"), QStringLiteral("sectionTitle")));
+    auto* addRow = new QHBoxLayout();
+    addRow->setSpacing(8);
+    m_newName = new QComboBox();
+    m_newName->setEditable(true);
+    m_newName->addItems({QStringLiteral("chrome.exe"), QStringLiteral("python.exe"), QStringLiteral("Code.exe"),
+                         QStringLiteral("notepad.exe")});
+    m_newName->setToolTip(QStringLiteral("Sample name for a simulated process; you can type any name"));
+    m_newPriority = new QSpinBox();
+    m_newPriority->setRange(0, 99);
+    m_newPriority->setPrefix(QStringLiteral("Priority "));
+    m_newPriority->setToolTip(QStringLiteral("0-99, lower number = higher priority"));
+    m_newBurst = new QSpinBox();
+    m_newBurst->setRange(1, 1000);
+    m_newBurst->setValue(4);
+    m_newBurst->setPrefix(QStringLiteral("Burst "));
+    m_newBurst->setToolTip(QStringLiteral("CPU time the process needs, in time units"));
+    auto* create = makeButton(QStringLiteral("Add simulated process"), QStringLiteral("primary"));
+    addRow->addWidget(m_newName, 2);
+    addRow->addWidget(m_newPriority, 1);
+    addRow->addWidget(m_newBurst, 1);
+    addRow->addWidget(create);
+    left->addLayout(addRow);
     auto* createRow = new QHBoxLayout();
     createRow->setSpacing(8);
-    auto* create = makeButton(QStringLiteral("Create process"), QStringLiteral("primary"));
-    create->setToolTip(QStringLiteral("Creates a new process in the NEW state"));
     m_fromSchedule = makeButton(QStringLiteral("Create from last CPU scheduling run"));
-    m_fromSchedule->setToolTip(QStringLiteral("Run a simulation on the CPU scheduling page first"));
+    m_fromSchedule->setToolTip(QStringLiteral("Run a simulation on the CPU Scheduling page first"));
     m_fromSchedule->setEnabled(false);
     auto* reset = makeButton(QStringLiteral("Reset simulation"));
-    createRow->addWidget(create);
     createRow->addWidget(m_fromSchedule);
     createRow->addStretch(1);
     createRow->addWidget(reset);
     left->addLayout(createRow);
 
     m_processes = new QTableWidget();
-    setupTable(m_processes, {QStringLiteral("Process ID"), QStringLiteral("Current state"),
-                             QStringLiteral("Transitions")});
+    setupTable(m_processes, {QStringLiteral("PID"), QStringLiteral("Process name"), QStringLiteral("State"),
+                             QStringLiteral("Priority"), QStringLiteral("Arrival"), QStringLiteral("Burst"),
+                             QStringLiteral("Remaining"), QStringLiteral("CPU time")});
     m_processes->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    alignNumericColumns(m_processes, {2});
+    alignNumericColumns(m_processes, {0, 3, 4, 5, 6, 7});
     m_processes->setMinimumHeight(170);
     left->addWidget(m_processes, 1);
     m_processesState = makeStateMessage();
@@ -142,6 +164,10 @@ QWidget* ProcessStatePage::buildSimulatorTab()
         const S to = edge.second;
         connect(button, &QPushButton::clicked, this, [this, from, to]() { applyTransition(from, to); });
     }
+    m_runTick = makeButton(QStringLiteral("Run 1 time unit"), QStringLiteral("primary"));
+    m_runTick->setToolTip(QStringLiteral("The RUNNING process executes for one time unit (CPU time +1, remaining -1)"));
+    actionGrid->addWidget(m_runTick, index / 2, 0, 1, 2);
+    connect(m_runTick, &QPushButton::clicked, this, &ProcessStatePage::onRunTick);
     actionGrid->setColumnStretch(0, 1);
     actionGrid->setColumnStretch(1, 1);
     left->addLayout(actionGrid);
@@ -167,7 +193,7 @@ QWidget* ProcessStatePage::buildSimulatorTab()
 
     layout->addWidget(makeLabel(QStringLiteral("Transition history (newest first)"), QStringLiteral("sectionTitle")));
     m_events = new QTableWidget();
-    setupTable(m_events, {QStringLiteral("Tick"), QStringLiteral("Process ID"), QStringLiteral("Action"),
+    setupTable(m_events, {QStringLiteral("Tick"), QStringLiteral("Process"), QStringLiteral("Action"),
                           QStringLiteral("Previous state"), QStringLiteral("New state")});
     m_events->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     alignNumericColumns(m_events, {0});
@@ -176,15 +202,7 @@ QWidget* ProcessStatePage::buildSimulatorTab()
     m_eventsState = makeStateMessage();
     layout->addWidget(m_eventsState);
 
-    connect(create, &QPushButton::clicked, this, [this]() {
-        const std::string id = m_sim.createProcess();
-        refreshSimulator();
-        for (int r = 0; r < m_processes->rowCount(); ++r)
-            if (m_processes->item(r, 0)->text() == QString::fromStdString(id))
-                m_processes->selectRow(r);
-        m_banner->showInfo(QStringLiteral("Created %1 in the NEW state. Next step: \"Admit to ready queue\".")
-                               .arg(QString::fromStdString(id)));
-    });
+    connect(create, &QPushButton::clicked, this, &ProcessStatePage::onAddProcess);
     connect(m_fromSchedule, &QPushButton::clicked, this, &ProcessStatePage::createFromSchedule);
     connect(reset, &QPushButton::clicked, this, [this]() {
         if (!m_sim.processes().empty()
@@ -245,7 +263,7 @@ QString ProcessStatePage::selectedProcess() const
     if (items.isEmpty())
         return QString();
     const QTableWidgetItem* item = m_processes->item(items.first()->row(), 0);
-    return item ? item->text() : QString();
+    return item ? item->data(Qt::UserRole).toString() : QString();
 }
 
 void ProcessStatePage::onProcessSelected()
@@ -254,7 +272,9 @@ void ProcessStatePage::onProcessSelected()
     const os::SimulatedProcess* p = id.isEmpty() ? nullptr : m_sim.find(id.toStdString());
     m_diagram->setCurrentState(p ? std::optional<S>(p->state) : std::nullopt);
     if (p) {
-        m_selectedSummary->setText(QStringLiteral("%1 is %2").arg(id, stateName(p->state)));
+        m_selectedSummary->setText(QStringLiteral("PID %1 (%2) is %3")
+                                       .arg(p->pid)
+                                       .arg(QString::fromStdString(p->name), stateName(p->state)));
     } else {
         m_selectedSummary->setText(m_sim.processes().empty() ? QStringLiteral("No process yet")
                                                              : QStringLiteral("Select a process"));
@@ -272,8 +292,14 @@ void ProcessStatePage::onProcessSelected()
             a.button->setToolTip(QString::fromStdString(os::explainInvalidTransition(id.toStdString(), p->state, a.to)));
     }
     const auto running = m_sim.runningProcess();
-    m_cpuStatus->setText(running ? QStringLiteral("CPU: running %1").arg(QString::fromStdString(*running))
-                                 : QStringLiteral("CPU: idle (no process is RUNNING)"));
+    const os::SimulatedProcess* runner = running ? m_sim.find(*running) : nullptr;
+    m_cpuStatus->setText(runner ? QStringLiteral("CPU: running PID %1 (%2). Simulation clock: %3")
+                                      .arg(runner->pid)
+                                      .arg(QString::fromStdString(runner->name))
+                                      .arg(m_sim.clock())
+                                : QStringLiteral("CPU: idle (no process is RUNNING). Simulation clock: %1")
+                                      .arg(m_sim.clock()));
+    m_runTick->setEnabled(runner != nullptr);
 }
 
 void ProcessStatePage::refreshSimulator()
@@ -286,9 +312,22 @@ void ProcessStatePage::refreshSimulator()
     for (int r = 0; r < static_cast<int>(processes.size()); ++r) {
         const os::SimulatedProcess& p = processes[static_cast<std::size_t>(r)];
         const QString id = QString::fromStdString(p.id);
-        m_processes->setItem(r, 0, makeItem(id));
-        m_processes->setItem(r, 1, makeStatusItem(stateName(p.state)));
-        m_processes->setItem(r, 2, makeNumberItem(p.transitions));
+        auto* pidItem = makeNumberItem(p.pid);
+        pidItem->setData(Qt::UserRole, id);  // the simulator's key for this process
+        m_processes->setItem(r, 0, pidItem);
+        m_processes->setItem(r, 1, makeItem(QString::fromStdString(p.name)));
+        m_processes->setItem(r, 2, makeStatusItem(stateName(p.state)));
+        m_processes->setItem(r, 3, makeNumberItem(p.priority));
+        m_processes->setItem(r, 4, makeNumberItem(p.arrival));
+        const bool timed = p.burst > 0;
+        auto numberOrDash = [](bool known, int value) {
+            QTableWidgetItem* item = known ? makeNumberItem(value) : makeItem(QStringLiteral("-"));
+            item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            return item;
+        };
+        m_processes->setItem(r, 5, numberOrDash(timed, p.burst));
+        m_processes->setItem(r, 6, numberOrDash(timed, p.remaining));
+        m_processes->setItem(r, 7, makeNumberItem(p.cpuTime));
         if (id == keep)
             reselect = r;
     }
@@ -309,8 +348,12 @@ void ProcessStatePage::refreshSimulator()
     for (int r = 0; r < static_cast<int>(events.size()); ++r) {
         const os::StateEvent& e = events[events.size() - 1 - static_cast<std::size_t>(r)];  // newest first
         m_events->setItem(r, 0, makeNumberItem(e.time));
-        m_events->setItem(r, 1, makeItem(QString::fromStdString(e.processId)));
-        m_events->setItem(r, 2, makeItem(actionLabel(e.from, e.to)));
+        const os::SimulatedProcess* who = m_sim.find(e.processId);
+        m_events->setItem(r, 1, makeItem(who ? QStringLiteral("%1 %2").arg(who->pid).arg(QString::fromStdString(who->name))
+                                             : QString::fromStdString(e.processId)));
+        m_events->setItem(r, 2, makeItem(e.reason == "Burst complete" || e.reason.rfind("Terminated before", 0) == 0
+                                             ? QString::fromStdString(e.reason)
+                                             : actionLabel(e.from, e.to)));
         m_events->setItem(r, 3, makeStatusItem(stateName(e.from)));
         m_events->setItem(r, 4, makeStatusItem(stateName(e.to)));
     }
@@ -353,6 +396,57 @@ void ProcessStatePage::applyTransition(S from, S to)
     }
     m_banner->showSuccess(QStringLiteral("%1: %2 moved from %3 to %4.")
                               .arg(actionLabel(from, to), id, stateName(from), stateName(to)));
+    refreshSimulator();
+}
+
+void ProcessStatePage::selectProcess(const std::string& id)
+{
+    const QString key = QString::fromStdString(id);
+    for (int r = 0; r < m_processes->rowCount(); ++r)
+        if (m_processes->item(r, 0) && m_processes->item(r, 0)->data(Qt::UserRole).toString() == key)
+            m_processes->selectRow(r);
+}
+
+void ProcessStatePage::onAddProcess()
+{
+    std::string error;
+    const int pid = m_sim.addProcess(m_newName->currentText().trimmed().toStdString(), m_newPriority->value(),
+                                     m_newBurst->value(), &error);
+    if (pid < 0) {
+        m_banner->showError(QString::fromStdString(error));
+        return;
+    }
+    refreshSimulator();
+    selectProcess(std::to_string(pid));
+    m_banner->showInfo(QStringLiteral("Simulated process PID %1 (%2) created in the NEW state. Next step: \"Admit to "
+                                      "ready queue\".")
+                           .arg(pid)
+                           .arg(m_newName->currentText().trimmed()));
+}
+
+void ProcessStatePage::onRunTick()
+{
+    const auto running = m_sim.runningProcess();
+    std::string error;
+    if (!running || !m_sim.runTick(&error)) {
+        m_banner->showWarning(QString::fromStdString(error.empty() ? std::string("No process is running.") : error));
+        return;
+    }
+    const os::SimulatedProcess* p = m_sim.find(*running);
+    if (p && p->state == S::Terminated)
+        m_banner->showSuccess(QStringLiteral("PID %1 (%2) used its last time unit and moved to TERMINATED.")
+                                  .arg(p->pid)
+                                  .arg(QString::fromStdString(p->name)));
+    else if (p && p->burst > 0)
+        m_banner->showInfo(QStringLiteral("PID %1 (%2) ran for 1 time unit: %3 unit(s) left.")
+                               .arg(p->pid)
+                               .arg(QString::fromStdString(p->name))
+                               .arg(p->remaining));
+    else if (p)
+        m_banner->showInfo(QStringLiteral("PID %1 (%2) ran for 1 time unit (no burst length set, so it runs until you "
+                                          "terminate it).")
+                               .arg(p->pid)
+                               .arg(QString::fromStdString(p->name)));
     refreshSimulator();
 }
 

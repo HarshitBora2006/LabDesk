@@ -154,7 +154,7 @@ void MaintenancePage::updateButtons()
     bool open = false;
     if (hasSelection) {
         const int row = m_table->selectedItems().first()->row();
-        open = m_table->item(row, 5) && m_table->item(row, 5)->text() == MaintenanceStatus::Open;
+        open = rawStatus(m_table->item(row, 5)) == MaintenanceStatus::Open;
     }
     m_edit->setEnabled(hasSelection);
     m_resolve->setEnabled(open);

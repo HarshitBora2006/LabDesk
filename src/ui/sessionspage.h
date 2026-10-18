@@ -24,7 +24,10 @@ class MessageBanner;
 class SessionsPage : public Page {
     Q_OBJECT
 public:
-    SessionsPage(Database& db, Services& services, QWidget* parent = nullptr);
+    // History: Usage Logs page (all sessions, admin can end an active one).
+    // TransactionDemo: DBMS > Transactions and Integrity (step-by-step COMMIT/ROLLBACK).
+    enum class Mode { History, TransactionDemo };
+    SessionsPage(Database& db, Services& services, Mode mode, QWidget* parent = nullptr);
     void refresh() override;
 
 private:
@@ -39,6 +42,7 @@ private:
 
     Database& m_db;
     Services& m_services;
+    Mode m_mode;
     MessageBanner* m_banner = nullptr;
 
     QCheckBox* m_activeOnly = nullptr;

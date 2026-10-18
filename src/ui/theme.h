@@ -37,6 +37,9 @@ struct StatusColors {
 // Computer, session, maintenance and process statuses share one lookup.
 StatusColors statusColors(const QString& status);
 
+// Human-readable label for a stored status value ("OCCUPIED" -> "In use").
+QString displayStatus(const QString& status);
+
 // Restrained, distinguishable colours for Gantt bars (white text is readable on all).
 QColor processColor(int index);
 

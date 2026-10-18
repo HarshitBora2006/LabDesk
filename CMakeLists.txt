@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(LabDesk
-    VERSION 0.7.3
+    VERSION 0.8.0
     DESCRIPTION "Smart Computer Lab Management and CPU Scheduling System"
     LANGUAGES CXX)
 
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(LABDESK_BUILD_TESTS "Build scheduler_tests, labqueue_tests and database_tests" ON)
+option(LABDESK_BUILD_TESTS "Build the test programs" ON)
 
 function(labdesk_set_warnings target)
     if(MSVC)
@@ -30,6 +30,8 @@ add_library(labdesk_os STATIC
     src/processstate.h
     src/labqueue.cpp
     src/labqueue.h
+    src/bankers.cpp
+    src/bankers.h
 )
 target_include_directories(labdesk_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 labdesk_set_warnings(labdesk_os)
@@ -50,6 +52,9 @@ add_library(labdesk_core STATIC
     src/maintenanceservice.cpp  src/maintenanceservice.h
     src/processservice.cpp      src/processservice.h
     src/queueservice.cpp        src/queueservice.h
+    src/adminservice.cpp        src/adminservice.h
+    src/reportservice.cpp       src/reportservice.h
+    src/dbmsservice.cpp         src/dbmsservice.h
     src/passwordhasher.cpp      src/passwordhasher.h
     src/timeutil.cpp            src/timeutil.h
     src/models.h
@@ -67,6 +72,18 @@ set(LABDESK_UI_SOURCES
     src/ui/theme.cpp                   src/ui/theme.h
     src/ui/uihelpers.cpp               src/ui/uihelpers.h
     src/ui/layouthelpers.cpp           src/ui/layouthelpers.h
+    src/ui/loginpage.cpp               src/ui/loginpage.h
+    src/ui/modulepage.cpp              src/ui/modulepage.h
+    src/ui/bankerspage.cpp             src/ui/bankerspage.h
+    src/ui/resourceallocationpage.cpp  src/ui/resourceallocationpage.h
+    src/ui/conceptguidepage.cpp        src/ui/conceptguidepage.h
+    src/ui/dboverviewpage.cpp          src/ui/dboverviewpage.h
+    src/ui/schemapage.cpp              src/ui/schemapage.h
+    src/ui/sqloperationspage.cpp       src/ui/sqloperationspage.h
+    src/ui/reportspage.cpp             src/ui/reportspage.h
+    src/ui/settingspage.cpp            src/ui/settingspage.h
+    src/ui/studenthomepage.cpp         src/ui/studenthomepage.h
+    src/ui/studenthistorypage.cpp      src/ui/studenthistorypage.h
     src/ui/dashboardpage.cpp           src/ui/dashboardpage.h
     src/ui/studentspage.cpp            src/ui/studentspage.h
     src/ui/computerspage.cpp           src/ui/computerspage.h
@@ -105,6 +122,11 @@ if(LABDESK_BUILD_TESTS)
     target_link_libraries(scheduler_tests PRIVATE labdesk_os)
     labdesk_set_warnings(scheduler_tests)
     add_test(NAME scheduler_tests COMMAND scheduler_tests)
+
+    add_executable(os_extra_tests tests/os_extra_tests.cpp)
+    target_link_libraries(os_extra_tests PRIVATE labdesk_os)
+    labdesk_set_warnings(os_extra_tests)
+    add_test(NAME os_extra_tests COMMAND os_extra_tests)
 
     add_executable(labqueue_tests tests/labqueue_tests.cpp)
     target_link_libraries(labqueue_tests PRIVATE labdesk_os)

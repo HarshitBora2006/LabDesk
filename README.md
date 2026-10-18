@@ -8,21 +8,21 @@ sign in, take an available computer and end their session. A separate module
 simulates CPU scheduling (FCFS, SJF, Priority, Round Robin) and the process
 lifecycle.
 
-> **Build status, read this first (version 0.7.3).** Version 0.7.1 was built
-> and run by the user on Windows with Qt 6.12 / MinGW (screenshots of the Lab
-> queue and CPU scheduling pages). 0.7.2–0.7.3 make measured lab data both
-> honest and readable: a Minutes / Seconds unit choice for the measured CPU
-> scheduling workload (minutes by default) with a distortion warning, and
-> m:ss durations on the Lab queue page. The
-> author compiled and ran everything that does not need Qt:
-> `scheduler_tests` 204 / 204, `labqueue_tests` 49 / 49 and the SQL validator
-> 91 / 91. The Qt changes in 0.7.2–0.7.3 and `database_tests` (98 checks) have **not
-> been compiled by the author**; rebuild and run `ctest`.
+> **Build status, read this first (version 0.8.0).** Version 0.7.x built and
+> ran on Windows with Qt 6.12 / MinGW (user screenshots). 0.8.0 is a GUI
+> redesign with role-based login, plus OS and DBMS modules. The author
+> compiled and ran everything that does not need Qt: `scheduler_tests`
+> 208 / 208, `labqueue_tests` 49 / 49, `os_extra_tests` 29 / 29 and the SQL
+> validator 113 / 113. The Qt application and `database_tests` (124 checks)
+> were **not compiled by the author**, because the authoring sandbox has no
+> Qt. Build and run `ctest` first.
 
 ---
 
 ## Contents
 
+1. [What changed in 0.8.0: redesign, roles, OS and DBMS modules](#what-changed-in-080-redesign-roles-os-and-dbms-modules)
+1. [Real records versus simulations](#real-records-versus-simulations)
 1. [What changed in 0.7.3](#what-changed-in-073)
 1. [What changed in 0.7.2](#what-changed-in-072)
 1. [What changed in 0.7.1](#what-changed-in-071)
@@ -41,6 +41,98 @@ lifecycle.
 
 Further documents: [`docs/SCHEMA.md`](docs/SCHEMA.md) (database design) and
 [`docs/TESTING.md`](docs/TESTING.md) (automated tests and manual test guide).
+
+---
+
+## What changed in 0.8.0: redesign, roles, OS and DBMS modules
+
+**Login and roles.**
+* LabDesk now starts on a login screen with *Admin Login* and *Student
+  Login*. Each role is checked against its own table (`admin` / `student`)
+  using salted password hashes, and the password field has a Show / Hide
+  toggle.
+* There is **no built-in administrator password**. On first start, choosing
+  Admin Login shows a one-time form to create the first administrator. Later
+  administrators are added under Settings.
+* After sign-in, a role-specific shell is built with a navy sidebar. Logging
+  out destroys it, so nothing from one user's session remains for the next.
+* "Remember me" and "Forgot password" were deliberately left out, because no
+  real mechanism exists for them.
+
+**Administrator navigation.**
+
+| Page | Content |
+|---|---|
+| Dashboard | Students, computers, available, in use, under maintenance and waiting figures; a status chart; recent activity; laboratory cards; active sessions |
+| Student Management | Add / edit / delete students |
+| Computer Management | Computers and Maintenance, as sub-tabs |
+| Allocation Management | Allocate a computer to a student, the queue policy, the waiting list, measured results and the what-if replay |
+| OS Management | Process Management, CPU Scheduling, Resource Allocation, Deadlock Avoidance, OS Concept Guide |
+| DBMS Management | Database Overview, Schema and Relationships, SQL Operations, Transactions and Integrity, DBMS Concept Guide |
+| Usage Logs | All sessions; an active one can be ended |
+| Reports | Usage by laboratory, last 14 days, most active students, waiting time by allocation rule |
+| Settings | Change password, administrator accounts, installation information |
+
+**Student navigation.**
+
+| Page | Content |
+|---|---|
+| Dashboard | Welcome, current session or queue position, and every computer with its laboratory and an Available / In use / Under maintenance badge |
+| My Session | Request a computer (purpose + expected length), join or leave the queue, end the session |
+| My Allocation History | The student's own sessions with waiting time and duration |
+| OS Management | Process Management, CPU Scheduling (own sessions only, read-only), Deadlock Avoidance, OS Concept Guide |
+
+**OS Management (new pieces).**
+* *Process Management.* Simulated processes with PID (from 1001), name
+  (sample names such as chrome.exe), priority, arrival, burst, remaining and
+  CPU time. The page offers Add, Admit, Dispatch, Run 1 time unit (which
+  terminates the process automatically at the end of its burst), Block for
+  I/O, Complete I/O, Preempt and Terminate. Only textbook transitions are
+  allowed, and refused ones explain why.
+* *Deadlock Avoidance.* The Banker's Algorithm, with editable Available /
+  Allocation / Maximum tables and Need computed live. It shows the safety
+  check with every step, plus the resource-request (granted / must wait /
+  denied and rolled back) and release algorithms, and loads the Silberschatz
+  textbook example. The page explains safe vs unsafe vs deadlocked.
+* *Resource Allocation.* The real lab as a resource-allocation system:
+  laboratories are resource types, computers are instances, sessions are
+  allocations. It also lists real allocate / release / wait events.
+
+**DBMS Management (new).** All of it reads the real database; no demo
+database is used.
+* *Database Overview:* engine and version, connection, foreign-key
+  enforcement, schema version, journal mode, every table with a live row
+  count, index and trigger counts, and an integrity check (`PRAGMA
+  quick_check`, `pragma_foreign_key_check`, business rules). The database
+  file path is not displayed.
+* *Schema and Relationships:* the columns, primary keys, NOT NULL, defaults,
+  foreign keys, indexes and triggers of each table, read with
+  `pragma_table_info` / `pragma_foreign_key_list`, plus all relationships.
+* *SQL Operations:* a catalogue of the statements the services really run,
+  with read-only "run it now" examples, and an administrator query console
+  limited to one SELECT. While it runs, SQLite's `query_only` mode is on, so
+  the engine itself refuses writes; columns named like "password" are masked.
+* *Transactions and Integrity:* the step-by-step COMMIT / ROLLBACK
+  demonstration with an injectable failure.
+
+**Database.** Schema version 3 adds the `admin` table. As before, the
+migration is additive: a 0.5–0.7 database gains the table on first start
+and keeps all its data.
+
+---
+
+## Real records versus simulations
+
+| Kind | Examples | Stored in |
+|---|---|---|
+| Real lab records | students, computers, sessions, maintenance, requests, administrator accounts | SQLite tables, with constraints and transactions |
+| Educational OS simulations | simulated processes (chrome.exe, ...), CPU schedules, Banker's states | memory only (scheduler workloads can be saved as explicit inputs in `process`) |
+| Measured scheduling of the real lab | arrival, waiting and actual session length of requests | derived by queries from real timestamps |
+
+LabDesk never inspects, starts or stops real Windows processes. A lab
+session is never treated as an operating-system process, and session
+duration is never used as a CPU burst unless you explicitly load *Measured
+lab visits*, which is labelled as a one-computer what-if.
 
 ---
 
@@ -218,10 +310,10 @@ On macOS the executable is `build/labdesk.app/Contents/MacOS/labdesk`.
    e.g. `C:\Projects\LabDesk`.
 3. In Qt Creator choose **File → Open File or Project…** and select
    `CMakeLists.txt`. Pick your Qt 6 kit and press **Configure Project**.
-4. Build with **Ctrl+B**. Four targets are built: `labdesk`,
-   `scheduler_tests`, `labqueue_tests` and `database_tests`.
+4. Build with **Ctrl+B**. Five targets are built: `labdesk`,
+   `scheduler_tests`, `labqueue_tests`, `os_extra_tests` and `database_tests`.
 5. Run: choose the `labdesk` run target and press **Ctrl+R**.
-6. Test: run `scheduler_tests`, `labqueue_tests` and `database_tests` as run targets (each
+6. Test: run `scheduler_tests`, `labqueue_tests`, `os_extra_tests` and `database_tests` as run targets (each
    prints every check and ends with `N passed, 0 failed`), or run `ctest` in
    the build folder from a Qt command prompt (below). Qt Creator can also list
    them under **Tools → Tests** once CTest is enabled in *Preferences →
@@ -268,11 +360,29 @@ To start over, close the app and delete the database file.
 
 ## Demo credentials and data
 
-Demo data is inserted **only** when both the `student` and `computer` tables
-are empty, and every record is labelled as demo data.
+**Administrator:** there is no default account. On first start, choose
+*Admin Login*. LabDesk asks you to create the first administrator (ID, name,
+password of at least 8 characters). Further administrators can be added in
+Settings.
+
+**Students:** demo data is inserted only when both the `student` and
+`computer` tables are empty (start with `--no-seed` to skip it). Every demo
+record is labelled as demo data.
 
 | Student ID | Name                  | Password  |
 |------------|-----------------------|-----------|
+| DEMO01     | Ananya Rawat (demo)   | `demo123` |
+| DEMO02     | Kabir Negi (demo)     | `demo123` |
+| DEMO03     | Meera Bisht (demo)    | `demo123` |
+| DEMO04     | Rohan Joshi (demo)    | `demo123` |
+
+The login screen mentions these accounts only if they exist in the database
+in use. The demo data also includes:
+* 20 computers in "Lab A, Block 1 (demo)" and "Lab B, Block 2 (demo)";
+* one open maintenance issue on LAB-B-08;
+* the textbook scheduler workload P1–P4.
+
+------------|-----------------------|-----------|
 | DEMO01     | Ananya Rawat (demo)   | `demo123` |
 | DEMO02     | Kabir Negi (demo)     | `demo123` |
 | DEMO03     | Meera Bisht (demo)    | `demo123` |
@@ -465,7 +575,11 @@ src/
   passwordhasher.*, timeutil.*
   scheduler.h/.cpp         FCFS, SJF, SRTF, Priority, RR (pure C++17, no Qt)
   labqueue.h/.cpp          lab queue policies, measured metrics, what-if replay (pure C++17)
+  bankers.h/.cpp           Banker's Algorithm: safety, request, release (pure C++17)
   queueservice.*           requests, waiting queue, transactional dispatch
+  adminservice.*           administrator accounts (hashed passwords, first-run setup)
+  reportservice.*          SQL reports, recent activity, student history
+  dbmsservice.*            schema introspection, integrity check, read-only query runner
   processstate.h/.cpp      state machine + lifecycle simulator (pure C++17)
   mainwindow.h/.cpp        sidebar navigation, cross-page refresh
   ui/                      one class per page, plus theme (palette + stylesheet),
@@ -475,7 +589,8 @@ src/
 tests/
   scheduler_tests.cpp      208 checks, no Qt needed
   labqueue_tests.cpp       49 checks, no Qt needed
-  database_tests.cpp       98 service-level integration checks (Qt Core + Sql)
+  os_extra_tests.cpp       29 checks (Banker's Algorithm, process management), no Qt needed
+  database_tests.cpp       124 service-level integration checks (Qt Core + Sql)
 tools/
   validate_schema.py       Qt-independent SQL validator (Python 3, stdlib only)
 docs/
@@ -500,22 +615,24 @@ and student views on the same committed state.
 
 | Item | How | Status |
 |---|---|---|
-| Scheduling engine + process-state model (incl. second-scale limits, RR slice guard) | `scheduler_tests`, g++ 13, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan | **208 / 208 passed** (author) |
-| Lab queue logic: dispatch order, measured metrics, what-if replay, measured → workload conversion in minutes or seconds, with rounding-error measure | `labqueue_tests`, same flags | **49 / 49 passed** (author) |
-| Test strength | Mutation checks: SRTF preemption disabled; SJF ordering broken | Both detected (26 and 4 failures) |
-| Schema v2, constraints, triggers, all service SQL, queue hand-over atomicity, v1 → v2 migration | `python3 tools/validate_schema.py` (SQLite 3.45) | **91 / 91 passed** (author) |
+| Scheduling engine + process-state model | `scheduler_tests`, g++ 13, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan | **208 / 208 passed** (author) |
+| Lab queue logic | `labqueue_tests`, same flags | **49 / 49 passed** (author) |
+| Banker's Algorithm + extended process manager | `os_extra_tests`, same flags. Includes the Silberschatz example and 500 random states compared with a brute-force search | **29 / 29 passed** (author) |
+| Test strength | Mutation checks (SRTF preemption, SJF order, Banker's safety rule) | All detected |
+| Schema v3, constraints, triggers, all service SQL, report SQL, introspection SQL, `query_only` guard, v1 → v3 and v2 → v3 migrations | `python3 tools/validate_schema.py` (SQLite 3.45) | **113 / 113 passed** (author) |
+| Read-only SQL examples on the SQL Operations page | Each example extracted from the source and executed under `query_only` | 7 / 7 ran (author) |
 | Source consistency | Script checks: members, service methods and helpers declared; methods defined; files in CMake | Passed (author) |
-| Qt application 0.5.0 / `database_tests` 0.5.0 | Built and run on Windows | Built; **59 / 59** (user report) |
-| Qt application 0.7.0 | Built and run on Windows, Qt 6.12 MinGW | Ran (user screenshots) |
-| Qt application 0.7.1 | Built and run on Windows | Ran (user screenshots) |
-| Qt application 0.7.3 (`labdesk`) | — | **Not compiled by the author** |
-| `database_tests` 0.7.x | 59 original + 13 (0.6) + 26 (queue) | **Result not yet reported** |
-| GUI behaviour 0.7.1 | Manual guide in `docs/TESTING.md` (M1–M15, V1–V11, Q1–Q10) | **Not performed yet** |
+| Qt application 0.7.x | Built and run on Windows, Qt 6.12 MinGW | Ran (user screenshots) |
+| Qt application 0.8.0 (`labdesk`) | — | **Not compiled by the author** |
+| `database_tests` 0.8.0 | 59 original + 65 added in 0.6–0.8 | **Not compiled or run by the author** |
+| GUI behaviour 0.8.0 | Manual guide in `docs/TESTING.md` (L1–L8, O1–O6, D1–D5, plus earlier steps) | **Not performed yet** |
 
 ## Known limitations
 
-* **No administrator authentication.** Anyone who can run the app can open
-  the admin pages.
+* **First-run administrator setup.** Whoever starts LabDesk first on an empty
+  database can create the administrator account. This is the usual first-run
+  model; protect the machine accordingly. There is no password reset: another
+  administrator can create a new account in Settings.
 * **Password hashing** is salted SHA-256 iterated 20 000 times. That is far
   better than plaintext but weaker than a memory-hard KDF such as Argon2id or
   bcrypt.
@@ -540,7 +657,10 @@ and student views on the same committed state.
   input limit; run such data through the Lab queue replay instead.
 * Queue positions refresh when data changes in this application. Several
   copies of the app sharing one database file would not notify each other.
-* Version 0.6.0 of the GUI has not yet been seen running by the author. Check
+* The administrator query console accepts SELECT only and masks password
+  columns, but an administrator can still read every other column of every
+  table.
+* Version 0.8.0 of the GUI has not yet been seen running by the author. Check
   it at several window sizes and at 125 % / 150 % Windows display scaling.
 
 ---
@@ -549,8 +669,8 @@ and student views on the same committed state.
 
 1. **Verify 0.6.0:** build, run both CTest targets, work through the manual
    guide in `docs/TESTING.md`, and record the results.
-2. Administrator accounts and roles (an `admin` table and a login screen),
-   plus an audit log of admin actions.
+2. An audit log of administrator actions (who added, edited or deleted
+   what), and session timeout for the signed-in user.
 3. Preemptive priority, priority aging, and process I/O bursts so the
    scheduler trace includes WAITING.
 4. Usage reports (hours per computer and per student, peak times) exported

@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = os.path.join(HERE, "..", "resources", "sql", "schema.sql")
 
 V1_STATEMENTS = 20  # number of statements in schema version 1 (LabDesk 0.5.0 / 0.6.0)
+V2_STATEMENTS = 30  # schema version 2 (LabDesk 0.7.x)
 
 passed = 0
 failed = 0
@@ -70,11 +71,13 @@ def connect(path):
     return con
 
 
-def apply_schema(con, path=None, version=2):
+def apply_schema(con, path=None, version=3):
     con.execute("BEGIN IMMEDIATE")
     statements = schema_statements(path)
     if version == 1:
-        statements = statements[:V1_STATEMENTS]  # v2 only appended statements, so v1 is the prefix
+        statements = statements[:V1_STATEMENTS]  # later versions only appended statements
+    elif version == 2:
+        statements = statements[:V2_STATEMENTS]
     for s in statements:
         con.execute(s)
     con.execute(f"PRAGMA user_version = {version}")
@@ -367,6 +370,77 @@ def queue_section(con):
         resolve(con, mid)
 
 
+def admin_and_reports_section(con):
+    print("Admin accounts, reports, activity and DB introspection (schema v3)")
+    check(count(con, "SELECT COUNT(*) FROM admin") == 0, "no default administrator exists")
+    con.execute("INSERT INTO admin (admin_id, name, password_hash, created_at) VALUES ('labadmin','Lab Admin','h',?)",
+                (ts(),))
+    check(raises(con, "INSERT INTO admin (admin_id, name, password_hash, created_at) VALUES ('labadmin','X','h',?)",
+                 (ts(),), contains="UNIQUE"), "duplicate admin id rejected")
+    check(raises(con, "INSERT INTO admin (admin_id, name, password_hash, created_at) VALUES ('x','X','h',?)",
+                 (ts(),), contains="CHECK"), "admin id shorter than 2 characters rejected")
+    check(raises(con, "INSERT INTO admin (admin_id, name, password_hash, created_at) VALUES ('ab','X','',?)",
+                 (ts(),), contains="CHECK"), "empty password hash rejected")
+    # julianday() must parse the stored timestamp format (with milliseconds and Z)
+    jd = con.execute("SELECT (julianday('2026-10-14T13:53:44.000Z') - julianday('2026-10-14T13:51:16.500Z')) * 1440.0"
+                     ).fetchone()[0]
+    check(abs(jd - 2.4583333) < 1e-4, f"julianday() parses stored timestamps (2 min 27.5 s = {jd:.4f} min)")
+    minutes = "((julianday(s.end_time) - julianday(s.start_time)) * 1440.0)"
+    labs = con.execute(f"SELECT c.location, '', COUNT(*), SUM({minutes}), AVG({minutes}) FROM session s "
+                       f"JOIN computer c ON c.computer_id = s.computer_id WHERE s.status = 'ENDED' "
+                       f"GROUP BY c.location ORDER BY SUM({minutes}) DESC").fetchall()
+    ended = count(con, "SELECT COUNT(*) FROM session WHERE status = 'ENDED'")
+    check(sum(r[2] for r in labs) == ended and all(r[3] >= 0 for r in labs), "usage by lab covers every ended session")
+    days = con.execute(f"SELECT date(s.start_time, 'localtime') AS d, '', COUNT(*), SUM({minutes}), AVG({minutes}) "
+                       f"FROM session s WHERE s.status = 'ENDED' AND s.start_time >= ? GROUP BY d ORDER BY d DESC",
+                       (ts(-14 * 86400),)).fetchall()
+    check(len(days) >= 1 and sum(r[2] for r in days) == ended, "usage by day (last 14 days)")
+    top = con.execute(f"SELECT s.student_id, st.name, COUNT(*), SUM({minutes}), AVG({minutes}) FROM session s "
+                      f"JOIN student st ON st.student_id = s.student_id WHERE s.status = 'ENDED' "
+                      f"GROUP BY s.student_id, st.name ORDER BY SUM({minutes}) DESC LIMIT ?", (10,)).fetchall()
+    check(len(top) >= 1, "top students query")
+    pol = con.execute("SELECT r.granted_by, COUNT(*), AVG((julianday(r.allocated_at) - julianday(r.requested_at)) * 1440.0),"
+                      " MAX((julianday(r.allocated_at) - julianday(r.requested_at)) * 1440.0) FROM lab_request r "
+                      "WHERE r.status = 'ALLOCATED' GROUP BY r.granted_by ORDER BY r.granted_by").fetchall()
+    check({p[0] for p in pol} >= {"IMMEDIATE", "SJF", "PRIORITY"}, f"queue waiting by policy ({[p[0] for p in pol]})")
+    activity = con.execute(
+        "SELECT t, kind, detail FROM ("
+        " SELECT s.start_time AS t, 'SESSION_START' AS kind, s.student_id || ' started using ' || s.computer_id AS detail FROM session s"
+        " UNION ALL SELECT s.end_time, 'SESSION_END', s.student_id || ' released ' || s.computer_id FROM session s WHERE s.end_time IS NOT NULL"
+        " UNION ALL SELECT m.reported_at, 'MAINTENANCE_OPEN', m.computer_id || ' reported: ' || m.description FROM maintenance m"
+        " UNION ALL SELECT m.resolved_at, 'MAINTENANCE_RESOLVED', m.computer_id || ' repaired and back in service' FROM maintenance m WHERE m.resolved_at IS NOT NULL"
+        " UNION ALL SELECT r.requested_at, 'QUEUE_JOIN', r.student_id || ' joined the waiting queue' FROM lab_request r WHERE r.granted_by IS NOT 'IMMEDIATE'"
+        ") ORDER BY t DESC LIMIT ?", (8,)).fetchall()
+    check(len(activity) == 8 and all(activity[i][0] >= activity[i + 1][0] for i in range(7)),
+          "recent activity: newest first, from real timestamps")
+    hist = con.execute("SELECT s.session_id, s.computer_id, c.location, s.start_time, s.end_time, s.status, r.purpose,"
+                       " r.requested_at, r.expected_minutes FROM session s JOIN computer c ON c.computer_id = s.computer_id"
+                       " LEFT JOIN lab_request r ON r.session_id = s.session_id WHERE s.student_id = ? "
+                       "ORDER BY s.session_id DESC", ("Q3",)).fetchall()
+    check(len(hist) == 1 and hist[0][6] == "ASSIGNMENT", "student history joins the request (purpose) to the session")
+
+    # introspection used by DbmsService
+    cols = con.execute('SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY cid',
+                       ("session",)).fetchall()
+    check([c[0] for c in cols][:3] == ["session_id", "student_id", "computer_id"] and cols[0][4] == 1,
+          "pragma_table_info(?) lists session columns with the primary key")
+    fks = con.execute('SELECT "from", "table", "to", on_delete FROM pragma_foreign_key_list(?) ORDER BY id, seq',
+                      ("session",)).fetchall()
+    check(sorted((f[0], f[1]) for f in fks) == [("computer_id", "computer"), ("student_id", "student")]
+          and all(f[3] == "RESTRICT" for f in fks), "pragma_foreign_key_list(?) shows both FKs with ON DELETE RESTRICT")
+    check(con.execute("PRAGMA quick_check").fetchone()[0] == "ok", "PRAGMA quick_check = ok")
+    check(con.execute('SELECT COUNT(*) FROM pragma_foreign_key_check').fetchone()[0] == 0, "no foreign-key violations")
+    # read-only runner: query_only makes the ENGINE refuse writes, even inside WITH
+    con.execute("PRAGMA query_only = ON")
+    check(len(con.execute("SELECT student_id FROM student").fetchall()) > 0, "query_only: SELECT works")
+    check(raises(con, "WITH x AS (SELECT 1) DELETE FROM student WHERE student_id IN (SELECT 1 FROM x)"),
+          "query_only: a write hidden in a WITH statement is refused by SQLite")
+    check(raises(con, "INSERT INTO admin VALUES ('zz','Z','h','2026-01-01T00:00:00Z')"), "query_only: INSERT refused")
+    con.execute("PRAGMA query_only = OFF")
+    con.execute("INSERT INTO admin VALUES ('zz','Z','h','2026-01-01T00:00:00Z')")
+    check(count(con, "SELECT COUNT(*) FROM admin WHERE admin_id='zz'") == 1, "writes work again after query_only = OFF")
+
+
 def migration_section():
     print("Migration: open a version-1 database with the version-2 schema")
     path = os.path.join(tempfile.mkdtemp(), "v1.db")
@@ -382,13 +456,29 @@ def migration_section():
     con = connect(path)
     apply_schema(con)  # what Database::open() does on start-up
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    check({"lab_request", "lab_setting"} <= tables, "v1 database gains lab_request and lab_setting")
+    check({"lab_request", "lab_setting", "admin"} <= tables, "v1 database gains lab_request, lab_setting and admin")
     check(count(con, "SELECT COUNT(*) FROM session WHERE student_id='OLD1' AND status='ENDED'") == 1,
           "existing sessions preserved by the migration")
-    check(count(con, "PRAGMA user_version") == 2, "user_version upgraded to 2")
+    check(count(con, "PRAGMA user_version") == 3, "user_version upgraded to 3")
     check(policy(con) == "FCFS", "default policy row created")
     apply_schema(con)
     check(count(con, "SELECT COUNT(*) FROM lab_setting") == 1, "re-applying the schema does not duplicate settings")
+    con.close()
+    print("Migration: open a version-2 database (0.7.x) with the version-3 schema")
+    path = os.path.join(tempfile.mkdtemp(), "v2.db")
+    con = connect(path)
+    apply_schema(con, version=2)
+    con.execute("INSERT INTO student VALUES ('OLD2','Old','old2@uni.edu','h','CSE')")
+    con.execute("INSERT INTO lab_request (student_id, purpose, priority, expected_minutes, requested_at) "
+                "VALUES ('OLD2','EXAM',1,30,?)", (ts(),))
+    check("admin" not in {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")},
+          "starting point really is a version-2 database")
+    con.close()
+    con = connect(path)
+    apply_schema(con)
+    check(count(con, "SELECT COUNT(*) FROM lab_request WHERE student_id='OLD2'") == 1, "v2 queue data preserved")
+    check(count(con, "SELECT COUNT(*) FROM admin") == 0 and count(con, "PRAGMA user_version") == 3,
+          "admin table added (empty), user_version 3")
     con.close()
 
 
@@ -399,7 +489,7 @@ def main():
 
     print("Schema")
     apply_schema(con)
-    check(len(schema_statements()) == 30, "schema file splits into 30 statements (v2: +lab_setting, +lab_request, 2 indexes, 5 triggers)")
+    check(len(schema_statements()) == 31, "schema file splits into 31 statements (v3 adds the admin table)")
     apply_schema(con)  # idempotent (IF NOT EXISTS)
     check(True, "schema can be applied twice (idempotent)")
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -576,6 +666,7 @@ def main():
     end_session(con, "S2")
 
     queue_section(con)
+    admin_and_reports_section(con)
 
     print("Consistency invariant")
     bad = count(con, """
@@ -590,7 +681,7 @@ def main():
     con = connect(path)
     apply_schema(con)
     check(count(con, "SELECT COUNT(*) FROM session") == n_sessions, "sessions persisted after reopen")
-    check(count(con, "PRAGMA user_version") == 2, "schema version 2 persisted")
+    check(count(con, "PRAGMA user_version") == 3, "schema version 3 persisted")
     con.close()
 
     migration_section()

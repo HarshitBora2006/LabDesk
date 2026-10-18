@@ -27,7 +27,11 @@ QPushButton* makeButton(const QString& text, const QString& variant = QString(),
 // Standard read-only, row-selecting table.
 void setupTable(QTableWidget* table, const QStringList& headers);
 QTableWidgetItem* makeItem(const QString& text, const QVariant& userData = QVariant());
+// Status cell: shows a readable label ("In use") and keeps the stored value
+// ("OCCUPIED") in kRawStatusRole; read it back with rawStatus().
+inline constexpr int kRawStatusRole = Qt::UserRole + 7;
 QTableWidgetItem* makeStatusItem(const QString& status);
+QString rawStatus(const QTableWidgetItem* item);
 QTableWidgetItem* makeNumberItem(double value, int decimals = 0);
 // Data stored with makeItem(..., userData) in column `column` of the selected row.
 QVariant selectedRowData(const QTableWidget* table, int column = 0);
@@ -53,6 +57,9 @@ QLabel* makeStatusChip(const QString& status, const QString& text);
 QLabel* makeStateMessage();
 void showEmptyState(QLabel* label, const QString& text);
 void showErrorState(QLabel* label, const QString& text);
+
+// Exact, readable duration from minutes: "0:04", "2:27", "1:05:12".
+QString formatDuration(double minutes);
 
 // Re-applies the stylesheet after a dynamic property change.
 void repolish(QWidget* widget);

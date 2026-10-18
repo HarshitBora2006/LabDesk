@@ -3,6 +3,9 @@
 #include "theme.h"
 
 #include <QFont>
+
+#include <cmath>
+
 #include <QFrame>
 #include <QHeaderView>
 #include <QMessageBox>
@@ -78,7 +81,8 @@ QTableWidgetItem* makeItem(const QString& text, const QVariant& userData)
 
 QTableWidgetItem* makeStatusItem(const QString& status)
 {
-    auto* item = new QTableWidgetItem(status);
+    auto* item = new QTableWidgetItem(theme::displayStatus(status));
+    item->setData(kRawStatusRole, status);  // code compares the stored value, never the label
     const theme::StatusColors c = theme::statusColors(status);
     item->setBackground(c.background);
     item->setForeground(c.foreground);
@@ -87,6 +91,11 @@ QTableWidgetItem* makeStatusItem(const QString& status)
     item->setFont(f);
     item->setTextAlignment(Qt::AlignCenter);
     return item;
+}
+
+QString rawStatus(const QTableWidgetItem* item)
+{
+    return item ? item->data(kRawStatusRole).toString() : QString();
 }
 
 QTableWidgetItem* makeNumberItem(double value, int decimals)
@@ -174,6 +183,21 @@ QLabel* makeStateMessage()
     label->setAlignment(Qt::AlignCenter);
     label->hide();
     return label;
+}
+
+QString formatDuration(double minutes)
+{
+    const bool negative = minutes < 0;
+    long long secs = static_cast<long long>(std::llround((negative ? -minutes : minutes) * 60.0));
+    const long long h = secs / 3600;
+    const long long m = (secs % 3600) / 60;
+    secs %= 60;
+    const QString text = h > 0 ? QStringLiteral("%1:%2:%3")
+                                     .arg(h)
+                                     .arg(m, 2, 10, QLatin1Char('0'))
+                                     .arg(secs, 2, 10, QLatin1Char('0'))
+                               : QStringLiteral("%1:%2").arg(m).arg(secs, 2, 10, QLatin1Char('0'));
+    return negative ? QStringLiteral("-") + text : text;
 }
 
 void repolish(QWidget* widget)

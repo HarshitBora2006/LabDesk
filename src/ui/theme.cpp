@@ -27,8 +27,31 @@ StatusColors statusColors(const QString& status)
         {QStringLiteral("RUNNING"), {QColor("#2563EB"), QColor("#FFFFFF")}},
         {QStringLiteral("WAITING"), {QColor("#FEF3C7"), QColor("#92400E")}},
         {QStringLiteral("TERMINATED"), {QColor("#E2E8F0"), QColor("#334155")}},
+        {QStringLiteral("CANCELLED"), {QColor("#F1F5F9"), QColor("#475569")}},
+        {QStringLiteral("ALLOCATED"), {QColor("#DCFCE7"), QColor("#166534")}},
+        // Banker's results
+        {QStringLiteral("SAFE"), {QColor("#DCFCE7"), QColor("#166534")}},
+        {QStringLiteral("UNSAFE"), {QColor("#FEE2E2"), QColor("#991B1B")}},
     };
     return map.value(status, {QColor("#F1F5F9"), QColor("#1E293B")});
+}
+
+QString displayStatus(const QString& status)
+{
+    static const QHash<QString, QString> names = {
+        {QStringLiteral("AVAILABLE"), QStringLiteral("Available")},
+        {QStringLiteral("OCCUPIED"), QStringLiteral("In use")},
+        {QStringLiteral("MAINTENANCE"), QStringLiteral("Under maintenance")},
+        {QStringLiteral("ACTIVE"), QStringLiteral("Active")},
+        {QStringLiteral("ENDED"), QStringLiteral("Ended")},
+        {QStringLiteral("OPEN"), QStringLiteral("Open")},
+        {QStringLiteral("RESOLVED"), QStringLiteral("Resolved")},
+        {QStringLiteral("WAITING_REQUEST"), QStringLiteral("Waiting")},
+        {QStringLiteral("ALLOCATED"), QStringLiteral("Allocated")},
+        {QStringLiteral("CANCELLED"), QStringLiteral("Cancelled")},
+    };
+    // Process states (NEW, READY, RUNNING, WAITING, TERMINATED) keep the textbook spelling.
+    return names.value(status, status);
 }
 
 QColor processColor(int index)
@@ -86,14 +109,41 @@ QWidget#transparent { background: transparent; }
 QDialog, QMessageBox, QInputDialog { background: #FFFFFF; }
 QMessageBox QLabel, QInputDialog QLabel { color: #1E293B; }
 
-QWidget#sidebar { background: #FFFFFF; border-right: 1px solid #E2E8F0; }
-QLabel#brand { font-size: 16pt; font-weight: 700; color: #1E293B; padding: 20px 20px 0 20px; }
-QLabel#brandSub { color: #64748B; padding: 2px 20px 14px 20px; }
+QWidget#sidebar { background: #0F172A; border: none; }
+QLabel#brand { font-size: 15pt; font-weight: 700; color: #FFFFFF; padding: 22px 20px 0 20px; }
+QLabel#brandSub { color: #94A3B8; padding: 2px 20px 14px 20px; }
 QListWidget#nav { background: transparent; border: none; outline: 0; }
-QListWidget#nav::item { padding: 9px 14px; margin: 1px 10px; border-radius: 6px; color: #334155; }
-QListWidget#nav::item:selected { background: #EFF6FF; color: #1D4ED8; font-weight: 600; }
-QListWidget#nav::item:hover:!selected { background: #F1F5F9; }
-QListWidget#nav::item:disabled { color: #94A3B8; padding-top: 16px; padding-bottom: 4px; }
+QListWidget#nav::item { padding: 9px 14px; margin: 1px 10px; border-radius: 8px; color: #CBD5E1; }
+QListWidget#nav::item:selected { background: #4F46E5; color: #FFFFFF; font-weight: 600; }
+QListWidget#nav::item:hover:!selected { background: #1E293B; color: #FFFFFF; }
+QListWidget#nav::item:disabled { color: #64748B; padding-top: 16px; padding-bottom: 4px; }
+QFrame#userBox { background: #1E293B; border-radius: 10px; }
+QLabel#userName { color: #FFFFFF; font-weight: 600; }
+QLabel#userRole { color: #94A3B8; }
+QPushButton#sidebarButton { background: transparent; color: #CBD5E1; border: 1px solid #334155; }
+QPushButton#sidebarButton:hover { background: #1E293B; color: #FFFFFF; border-color: #475569; }
+
+/* ---------- login ---------- */
+QWidget#loginRoot { background: #F4F7FB; }
+QFrame#loginBrand { background: #0F172A; }
+QLabel#loginTitle { color: #FFFFFF; font-size: 28pt; font-weight: 700; }
+QLabel#loginSubtitle { color: #C7D2FE; font-size: 13pt; }
+QLabel#loginPoint { color: #CBD5E1; }
+QLabel#loginFootnote { color: #64748B; }
+QFrame#loginCard { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 14px; }
+QPushButton[segment="true"] { background: #FFFFFF; color: #334155; border: 1px solid #CBD5E1; padding: 9px 14px; }
+QPushButton[segment="true"]:checked { background: #4F46E5; color: #FFFFFF; border-color: #4F46E5; font-weight: 600; }
+
+/* ---------- module sub-navigation (OS / DBMS / Computers) ---------- */
+QTabWidget#moduleTabs::pane { border: none; background: transparent; top: 0px; }
+QTabWidget#moduleTabs::tab-bar { left: 32px; }
+QTabWidget#moduleTabs > QTabBar { background: transparent; }
+QTabWidget#moduleTabs > QTabBar::tab {
+    background: #FFFFFF; color: #475569; border: 1px solid #E2E8F0; border-radius: 8px;
+    padding: 7px 16px; margin: 16px 6px 2px 0;
+}
+QTabWidget#moduleTabs > QTabBar::tab:selected { background: #EEF2FF; color: #3730A3; border-color: #C7D2FE; font-weight: 600; }
+QTabWidget#moduleTabs > QTabBar::tab:hover:!selected { color: #1E293B; border-color: #CBD5E1; }
 
 /* ---------- typography ---------- */
 QLabel#pageTitle { font-size: 18pt; font-weight: 600; color: #1E293B; }
@@ -101,6 +151,8 @@ QLabel#pageSubtitle, QLabel#muted, QLabel#statLabel, QLabel#caption { color: #64
 QLabel#sectionTitle { font-size: 11.5pt; font-weight: 600; color: #1E293B; }
 QLabel#statValue { font-size: 21pt; font-weight: 600; color: #1E293B; }
 QLabel#fieldLabel { color: #334155; font-weight: 600; }
+QLabel#guideTitle { font-size: 11pt; font-weight: 600; color: #3730A3; }
+QLabel#mono { font-family: "Consolas", "Cascadia Mono", "Courier New", monospace; color: #1E293B; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 8px 10px; }
 QLabel#explainer { color: #334155; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 12px; }
 
 /* ---------- cards ---------- */

@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QPair>
 #include <QPushButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTimer>
@@ -71,9 +72,9 @@ lab::MeasuredVisit toVisit(const RequestRecord& r)
 LabQueuePage::LabQueuePage(Services& services, QWidget* parent) : Page(parent), m_services(services)
 {
     QWidget* body = makeScrollPage(this);
-    QVBoxLayout* root = makePageLayout(body, QStringLiteral("Lab queue"),
-                                       QStringLiteral("Who gets the next free computer, and the measured waiting "
-                                                      "and usage times of real visits."));
+    QVBoxLayout* root = makePageLayout(body, QStringLiteral("Allocation Management"),
+                                       QStringLiteral("Allocate computers, run the waiting queue and see the measured "
+                                                      "waiting and usage times of real visits."));
     root->addWidget(makeExplainer(QStringLiteral(
         "This applies CPU-scheduling ideas to the lab itself: each student request is a job and each computer is a "
         "processor. Arrival is the moment a student requests a computer, waiting is the time until one is assigned, "
@@ -82,6 +83,7 @@ LabQueuePage::LabQueuePage(Services& services, QWidget* parent) : Page(parent), 
         "non-preemptive.")));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
+    root->addWidget(buildAllocateCard());
     root->addWidget(buildPolicyCard());
     root->addWidget(buildQueueCard());
     root->addWidget(buildMeasuredCard());
@@ -96,6 +98,88 @@ LabQueuePage::LabQueuePage(Services& services, QWidget* parent) : Page(parent), 
     });
     m_tick->start();
     onPolicyChosen();
+}
+
+QWidget* LabQueuePage::buildAllocateCard()
+{
+    QFrame* card = makeCard();
+    QVBoxLayout* layout = cardLayout(card);
+    layout->addWidget(makeLabel(QStringLiteral("Allocate a computer to a student"), QStringLiteral("sectionTitle")));
+    layout->addWidget(makeLabel(QStringLiteral("Runs the same transaction as the student portal: the request (arrival) "
+                                               "and the session start are recorded together. Refused while students "
+                                               "are waiting, because free computers then go to the queue."),
+                                QStringLiteral("caption")));
+    auto* row = new QHBoxLayout();
+    row->setSpacing(10);
+    m_allocStudent = new QComboBox();
+    m_allocStudent->setMinimumWidth(220);
+    m_allocComputer = new QComboBox();
+    m_allocComputer->setMinimumWidth(180);
+    m_allocPurpose = new QComboBox();
+    for (lab::Purpose p : {lab::Purpose::Exam, lab::Purpose::Assignment, lab::Purpose::Practice})
+        m_allocPurpose->addItem(QString::fromStdString(lab::purposeName(p)), QString::fromLatin1(lab::purposeCode(p)));
+    m_allocPurpose->setCurrentIndex(1);
+    m_allocMinutes = new QSpinBox();
+    m_allocMinutes->setRange(lab::kMinExpectedMinutes, lab::kMaxExpectedMinutes);
+    m_allocMinutes->setSingleStep(5);
+    m_allocMinutes->setValue(60);
+    m_allocMinutes->setSuffix(QStringLiteral(" min"));
+    auto* allocate = makeButton(QStringLiteral("Allocate"), QStringLiteral("primary"));
+    row->addWidget(m_allocStudent, 2);
+    row->addWidget(m_allocComputer, 2);
+    row->addWidget(m_allocPurpose, 1);
+    row->addWidget(m_allocMinutes);
+    row->addWidget(allocate);
+    layout->addLayout(row);
+    connect(allocate, &QPushButton::clicked, this, &LabQueuePage::onAllocate);
+    return card;
+}
+
+void LabQueuePage::reloadAllocateChoices()
+{
+    const QString student = m_allocStudent->currentData().toString();
+    const QString computer = m_allocComputer->currentData().toString();
+    m_allocStudent->clear();
+    QSet<QString> busy;
+    for (const SessionRecord& r : m_services.sessions.listSessions(true, 5000))
+        busy.insert(r.studentId);
+    std::vector<QueueEntry> waiting;
+    m_services.queue.waitingQueue(waiting);
+    for (const QueueEntry& e : waiting)
+        busy.insert(e.studentId);
+    for (const Student& st : m_services.students.listStudents())
+        if (!busy.contains(st.studentId))
+            m_allocStudent->addItem(QStringLiteral("%1 (%2)").arg(st.name, st.studentId), st.studentId);
+    if (m_allocStudent->count() == 0)
+        m_allocStudent->addItem(QStringLiteral("No student without a session"), QString());
+    m_allocComputer->clear();
+    for (const Computer& c : m_services.computers.listComputers(ComputerStatus::Available))
+        m_allocComputer->addItem(QStringLiteral("%1, %2").arg(c.computerId, c.location), c.computerId);
+    if (m_allocComputer->count() == 0)
+        m_allocComputer->addItem(QStringLiteral("No computer available"), QString());
+    const int si = m_allocStudent->findData(student);
+    if (si >= 0)
+        m_allocStudent->setCurrentIndex(si);
+    const int ci = m_allocComputer->findData(computer);
+    if (ci >= 0)
+        m_allocComputer->setCurrentIndex(ci);
+}
+
+void LabQueuePage::onAllocate()
+{
+    const QString student = m_allocStudent->currentData().toString();
+    const QString computer = m_allocComputer->currentData().toString();
+    if (student.isEmpty() || computer.isEmpty()) {
+        m_banner->showWarning(QStringLiteral("Choose a student without a session and an available computer."));
+        return;
+    }
+    const OpResult r =
+        m_services.queue.startNow(student, computer, m_allocPurpose->currentData().toString(), m_allocMinutes->value());
+    if (r.ok)
+        m_banner->showSuccess(QStringLiteral("%1 now uses %2 (session #%3).").arg(student, computer).arg(r.id));
+    else
+        m_banner->showError(QStringLiteral("Allocation refused: ") + r.message);
+    emit dataChanged();
 }
 
 QWidget* LabQueuePage::buildPolicyCard()
@@ -257,6 +341,7 @@ void LabQueuePage::refresh()
     const DashboardStats stats = m_services.computers.dashboardStats();
     if (m_computers->property("userSet").toBool() == false)
         m_computers->setValue(qMax(1, stats.totalComputers - stats.maintenance));
+    reloadAllocateChoices();
     refreshQueue();
     refreshMeasured();
 }

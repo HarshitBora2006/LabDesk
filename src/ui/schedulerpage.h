@@ -36,6 +36,11 @@ public:
     SchedulerPage(Services& services, QWidget* parent = nullptr);
     void refresh() override;  // refreshes the workload list; never discards table edits
 
+    // Student view: only the demo workload and the student's own sessions are
+    // listed, measured lab data (other students' visits) is hidden, and nothing
+    // can be saved to the database.
+    void setStudentScope(const QString& studentId);
+
 signals:
     void scheduleComputed(const labdesk::os::ScheduleResult& result);
 
@@ -115,6 +120,7 @@ private:
     bool m_hasSavedWorkload = false;       // database had rows for m_loadedKey at load time
     QList<qint64> m_savedRowIds;           // process_id values of those rows
     bool m_dirty = false;                  // table differs from what was loaded/saved
+    QString m_studentScope;                // empty = administrator view
     bool m_loadedMeasured = false;         // table holds the read-only measured lab visits
     int m_measuredTotal = 0;               // finished visits available when loaded
     bool m_measuredInSeconds = false;      // unit of the loaded measured values (default minutes)
