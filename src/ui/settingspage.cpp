@@ -31,7 +31,7 @@ SettingsPage::SettingsPage(Services& services, const QString& adminId, QWidget* 
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("Settings"),
-                                       QStringLiteral("Your account, administrator accounts and this installation."));
+                                       QStringLiteral("Account and system settings"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
@@ -99,12 +99,8 @@ void SettingsPage::refresh()
     DatabaseOverview o;
     QString dbError;
     const bool ok = m_services.dbms.overview(o, &dbError);
-    m_about->setText(QStringLiteral("LabDesk %1, built with Qt %2 (running on Qt %3).\n"
-                                    "Database: %4, schema version %5, foreign keys %6. The database file is kept in "
-                                    "your user profile's application-data folder; start LabDesk with --db <file> to "
-                                    "use another one.\n"
-                                    "The queue policy is set on the Allocation Management page.")
-                         .arg(QCoreApplication::applicationVersion(), QStringLiteral(QT_VERSION_STR),
+    m_about->setText(QStringLiteral("LabDesk %1 (Qt %2, running on Qt %3)\nDatabase: %4, schema version %5, foreign keys %6.")
+                         .arg(QCoreApplication::applicationVersion(), QString::fromLatin1(QT_VERSION_STR),
                               QString::fromLatin1(qVersion()), ok ? o.engine : QStringLiteral("unavailable"))
                          .arg(o.schemaVersion)
                          .arg(o.foreignKeysOn ? QStringLiteral("enforced") : QStringLiteral("OFF")));

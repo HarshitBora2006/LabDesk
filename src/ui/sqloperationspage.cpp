@@ -98,15 +98,13 @@ SqlOperationsPage::SqlOperationsPage(Services& services, QWidget* parent) : Page
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("SQL Operations"),
-                                       QStringLiteral("The statements LabDesk actually runs, and where."));
+                                       QStringLiteral("SQL used by the application"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
     QFrame* catalogueCard = makeCard();
     cardLayout(catalogueCard)->addWidget(makeLabel(QStringLiteral("Operations used by the application"), QStringLiteral("sectionTitle")));
-    cardLayout(catalogueCard)->addWidget(makeLabel(QStringLiteral("All input is passed as ? parameters (prepared "
-                                                                  "statements), never pasted into the SQL text. Select "
-                                                                  "a row to see the statement."),
+    cardLayout(catalogueCard)->addWidget(makeLabel(QStringLiteral("Select a row to see the SQL. All input uses ? parameters."),
                                                    QStringLiteral("caption")));
     m_catalogue = new QTableWidget();
     setupTable(m_catalogue, {QStringLiteral("Operation"), QStringLiteral("Used by"), QStringLiteral("Code")});
@@ -132,9 +130,7 @@ SqlOperationsPage::SqlOperationsPage(Services& services, QWidget* parent) : Page
     QFrame* consoleCard = makeCard();
     cardLayout(consoleCard)->addWidget(makeLabel(QStringLiteral("Read-only query console"), QStringLiteral("sectionTitle")));
     cardLayout(consoleCard)->addWidget(makeLabel(
-        QStringLiteral("Administrators only. One SELECT (or WITH ... SELECT) at a time. While it runs, SQLite's "
-                       "query_only mode is on, so the database engine refuses any change. Columns whose name contains "
-                       "\"password\" are hidden. At most 500 rows are shown."),
+        QStringLiteral("One read-only SELECT at a time. Password columns are hidden."),
         QStringLiteral("caption")));
     m_console = new QPlainTextEdit();
     m_console->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
@@ -160,8 +156,7 @@ SqlOperationsPage::SqlOperationsPage(Services& services, QWidget* parent) : Page
             return;
         const QString runnable = QString::fromUtf8(kOperations[index.toInt()].runnable);
         if (runnable.isEmpty()) {
-            m_banner->showInfo(QStringLiteral("This operation changes data, so it only runs inside its own screen and "
-                                              "transaction; it cannot be run from here."));
+            m_banner->showInfo(QStringLiteral("This statement changes data and cannot run here."));
             return;
         }
         m_console->setPlainText(runnable);
@@ -179,8 +174,8 @@ void SqlOperationsPage::onOperationSelected()
     const Operation& op = kOperations[index.toInt()];
     m_sql->setText(QString::fromUtf8(op.sql));
     m_note->setText(QString::fromUtf8(op.runnable).isEmpty()
-                        ? QStringLiteral("Writes data: runs only inside its screen's transaction.")
-                        : QStringLiteral("Read-only: the example below replaces ? parameters with sample values."));
+                        ? QStringLiteral("Changes data; runs only inside its own screen.")
+                        : QStringLiteral("Read-only example with sample values."));
 }
 
 void SqlOperationsPage::runQuery(const QString& sql)

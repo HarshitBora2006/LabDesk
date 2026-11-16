@@ -120,6 +120,14 @@ std::optional<AdminAccount> AdminService::authenticate(const QString& adminId, c
     return AdminAccount{q.value(0).toString(), q.value(1).toString()};
 }
 
+OpResult AdminService::removeAllAdmins() const
+{
+    QSqlQuery q(m_db.connection());
+    if (!q.exec(QStringLiteral("DELETE FROM admin")))
+        return OpResult::failure(friendlySqlError(q.lastError()));
+    return OpResult::success(QStringLiteral("Removed %1 administrator account(s).").arg(q.numRowsAffected()));
+}
+
 OpResult AdminService::changePassword(const QString& adminId, const QString& currentPassword,
                                       const QString& newPassword) const
 {

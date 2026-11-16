@@ -105,7 +105,7 @@ struct ReplayResult {
 // Throws std::invalid_argument if computers < 1 or a burst is not positive.
 ReplayResult replay(Policy policy, const std::vector<ReplayJob>& jobs, int computers);
 
-// ---- measured visits as a CPU-scheduling workload (CPU Scheduling page)
+// ---- measured visits as a CPU-scheduling workload
 struct FinishedVisit {
     long long requestId = 0;
     long long arrivalMs = 0;

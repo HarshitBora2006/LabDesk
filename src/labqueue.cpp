@@ -39,15 +39,9 @@ std::string policyName(Policy policy)
 std::string policyDescription(Policy policy)
 {
     switch (policy) {
-    case Policy::FCFS:
-        return "The student who has waited longest gets the next free computer. Fair and predictable, but a short "
-               "exam check may wait behind long practice sessions.";
-    case Policy::SJF:
-        return "The student who expects the shortest session gets the next free computer. This lowers the average "
-               "waiting time, but relies on honest estimates and can make long requests wait a long time.";
-    case Policy::Priority:
-        return "Exam requests go first, then assignments, then practice; ties go to the earlier request. Urgent work "
-               "is served quickly, but practice requests can wait a long time when the lab is busy.";
+    case Policy::FCFS: return "The student who has waited longest gets the next free computer.";
+    case Policy::SJF: return "The shortest expected session gets the next free computer.";
+    case Policy::Priority: return "Exam first, then assignment, then practice.";
     }
     return {};
 }

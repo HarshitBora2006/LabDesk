@@ -18,15 +18,16 @@ g++ -std=c++17 -Wall -Wextra -Isrc src/labqueue.cpp tests/labqueue_tests.cpp -o 
 ./scheduler_tests && ./labqueue_tests
 ```
 
-## Status at hand-over (version 0.8.0)
+## Status at hand-over (version 0.9.0)
 
 | Suite | Result | Notes |
 |---|---|---|
 | `scheduler_tests` | **208 passed, 0 failed** (author) | g++ 13.3, `-Wall -Wextra -Wpedantic -Werror`, AddressSanitizer + UBSan |
+| `ossimulator_tests` | **23 passed, 0 failed** (author) | Same schedule as os::Scheduler on 400 random workloads × 4 algorithms; hand-traced disk (AABBBAA), memory and printer cases; 500 random runs with every feature |
 | `os_extra_tests` | **29 passed, 0 failed** (author) | Banker's Algorithm (textbook example, request / release, 500 random states vs brute force) and the extended process manager (PID, burst, run-one-unit, automatic termination) |
 | `labqueue_tests` | **49 passed, 0 failed** (author) | Same flags. Hand-calculated dispatch and replay cases, 300 random labs × 3 policies, and the measured-visits-to-workload conversion in minutes (61 min → 61, 2 h → 120, <1 % error; short visits flagged >10 %) and seconds (147 s → 147, 4.4 s → 4) |
 | `validate_schema.py` | **113 passed, 0 failed** (author) | SQLite 3.45.1. Includes the queue workflows, hand-over atomicity and the v1 → v2 migration |
-| `database_tests` | **not yet run on 0.8.0** (124 checks) | 0.5.0 passed 59 / 59 on Windows (user report). 0.7.0 keeps those 59 and adds 39 |
+| `database_tests` | **not yet run on 0.9.0** (124 checks) | 0.5.0 passed 59 / 59 on Windows (user report). 0.7.0 keeps those 59 and adds 39 |
 | Manual GUI tests | **not yet run on 0.7.0** | Qt is not available in the authoring environment |
 
 Do not mark a test as passed until you have run it yourself. Record your
@@ -129,7 +130,8 @@ P1 (0, 8), P2 (1, 4), P3 (2, 9), P4 (3, 5). The schedule is
 > transactions" is now split into **Usage Logs** (history) and **DBMS
 > Management > Transactions and Integrity** (demonstration), "Lab queue" is
 > **Allocation Management**, and "Maintenance" is a tab of **Computer
-> Management**. Administrator pages require signing in as an administrator
+> Management**. Since 0.9.0, "Process states" / "Process Management" is
+> replaced by **OS Management > OS Simulator**. Administrator pages require signing in as an administrator
 > (steps L1–L2).
 
 Start each run with a fresh database so the results are reproducible:
@@ -217,17 +219,33 @@ steps can be seen.
 | **L6** *(student isolation)* | As DEMO01: OS Management > CPU Scheduling, open the Workload list. | Only the demo workload and DEMO01's own sessions are listed; no measured-visits entry; no Save button. |
 | **L7** *(admin pages)* | As administrator, open every sidebar entry and every sub-tab. | Each opens the correct page with real data or an informative empty state; no black areas; nothing clipped at 1100 × 700. |
 | **L8** *(allocate)* | Allocation Management > Allocate: choose a student and an available computer, press Allocate. | The session starts, the dashboard figures, recent activity and Usage Logs update. Allocating the same computer again is impossible (it disappears from the list); while someone waits, allocation is refused. |
-| **O1** *(process management)* | Add chrome.exe (priority 1, burst 3) and python.exe (2, 2). Admit both, dispatch chrome.exe, press Run 1 time unit three times. | PIDs 1001 and 1002. Remaining 3 → 0 and CPU time 0 → 3; at 0 the process becomes TERMINATED automatically ("Burst complete" in the history). |
-| **O2** | Try Dispatch on a NEW process, Block for I/O on a READY process, and dispatching a second process while one runs. | Each is refused with a plain-language reason (must be admitted first / only RUNNING can block / CPU busy). |
 | **O3** *(Banker's)* | Deadlock Avoidance: Check safety on the textbook example. | SAFE, sequence P1 → P3 → P0 → P2 → P4, final work (10, 5, 7). |
 | **O4** | Request for P1: `1 0 2`; then P4: `3 3 0`; then P0: `0 2 0`. | Granted (tables update); must wait; denied as unsafe and rolled back (tables unchanged). |
 | **O5** | Change Allocation so that some value exceeds Maximum and Check safety. | Refused with a validation message; Need shows the negative value in red. |
-| **O6** *(resource allocation)* | Open Resource Allocation after L8. | Per-laboratory instances, allocated and available match the Computers page; the new allocation appears as an "Allocate" event. |
-| **D1** *(overview)* | DBMS Management > Database Overview; Run integrity check. | SQLite version, foreign keys "Enforced (ON)", schema version 3, every table with its row count, no file path shown. Integrity: quick_check ok, no orphaned rows, business rules ok. |
+| **D1** *(overview)* | DBMS Management > Database Overview. | SQLite version, foreign keys "Enforced (ON)", schema version 3, and every table with its record count. |
 | **D2** *(schema)* | Schema and Relationships: select `session`, then `admin`. | session: 6 columns, PK session_id, two foreign keys with RESTRICT, its indexes and triggers. admin: no foreign keys (stated as such). All relationships listed below. |
 | **D3** *(SQL operations)* | Select each catalogue row; run the read-only examples. | SELECT examples run and show rows; INSERT / UPDATE / DELETE / transaction rows explain that they only run inside their screens. |
 | **D4** *(console safety)* | In the console run `DELETE FROM student`, then `SELECT 1; SELECT 2`, then `SELECT student_id, password_hash FROM student`. | The first two are refused; the third shows "(hidden)" in the password column. |
 | **D5** *(transactions)* | Transactions and Integrity: run an allocation with the injected failure. | The log ends in ROLLBACK and the computer stays AVAILABLE (as in M12). |
+
+> **Since 0.9.1** the CPU Scheduling, Deadlock Avoidance and OS Concept Guide
+> pages are removed; OS Management opens the OS Simulator directly. Manual
+> steps that use those pages (M11, V7–V9, Q10, O3–O5, S7) no longer apply.
+
+## Manual checks for the OS Simulator (0.9.2)
+
+OS Management, with the example loaded and FCFS selected. Since 0.9.2 the
+simulator has no disk or printer: the program table has Program, Arrival,
+CPU time, Priority and Memory blocks.
+
+| Step | Action | Expected result |
+|---|---|---|
+| **S1** *(step by step)* | Press Step 4 times. | Time 4. chrome.exe is running with 1 unit left; the ready queue is python.exe → Code.exe. notepad.exe (arrived at 3) stays NEW and the log says it needs 2 free blocks. Memory shows 7 of 8 blocks used. |
+| **S2** *(run to end)* | Press Run to end. | Finished at time 16. Gantt: chrome ×5, python ×4, Code ×4, notepad ×3. Average turnaround 9.25, average ready wait 4.75, CPU busy 100 %, 3 context switches. |
+| **S3** *(turnaround identity)* | In the process table, check notepad.exe. | Finished at 16, arrival 3: turnaround 13 = CPU 3 + ready wait 8 + memory wait 2. |
+| **S4** *(Round Robin)* | Reset, choose Round Robin, quantum 2, Run to end. | Finished at time 16, average turnaround 11.25, 7 context switches; notepad.exe waits 7 ticks for memory. |
+| **S5** *(Start / Pause / speed)* | Reset, Start at Slow, Pause after a few ticks, change speed, Start again. | The clock advances automatically, stops on Pause, and continues at the new speed; programs cannot be edited while the simulation is loaded. |
+| **S6** *(validation)* | Reset, set a program's Memory blocks to 9 (with 8 blocks), press Step. | A red error explains the problem; nothing starts. |
 
 ## Results log
 
@@ -244,7 +262,9 @@ Fill this in when you run the tests. Leave cells empty rather than guessing.
 | | | | `labqueue_tests` | | |
 | | | | Q1 – Q10 (0.7.x) | | |
 | | | | `os_extra_tests` | | |
-| | | | L1 – L8, O1 – O6, D1 – D5 (0.8.0) | | |
+| | | | L1 – L8, O3 – O5, D1 – D5 (0.8.0) | | |
+| | | | `ossimulator_tests` | | |
+| | | | S1 – S6 (0.9.2) | | |
 
 ## Writing up failures
 

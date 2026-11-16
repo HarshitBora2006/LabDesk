@@ -2,7 +2,6 @@
 
 #include "database.h"
 #include "services.h"
-#include "ui/bankerspage.h"
 #include "ui/computerspage.h"
 #include "ui/conceptguidepage.h"
 #include "ui/dashboardpage.h"
@@ -11,11 +10,9 @@
 #include "ui/loginpage.h"
 #include "ui/maintenancepage.h"
 #include "ui/modulepage.h"
+#include "ui/ossimulatorpage.h"
 #include "ui/page.h"
-#include "ui/processstatepage.h"
 #include "ui/reportspage.h"
-#include "ui/resourceallocationpage.h"
-#include "ui/schedulerpage.h"
 #include "ui/schemapage.h"
 #include "ui/sessionspage.h"
 #include "ui/settingspage.h"
@@ -145,15 +142,7 @@ void MainWindow::buildAdminPages(const QString& adminId)
     computerModule->addSubPage(computers, QStringLiteral("Computers"));
     computerModule->addSubPage(new ui::MaintenancePage(s), QStringLiteral("Maintenance"));
 
-    auto* scheduler = new ui::SchedulerPage(s);
-    auto* processes = new ui::ProcessStatePage();
-    auto* os = new ui::ModulePage();
-    os->addSubPage(processes, QStringLiteral("Process Management"));
-    os->addSubPage(scheduler, QStringLiteral("CPU Scheduling"));
-    os->addSubPage(new ui::ResourceAllocationPage(s), QStringLiteral("Resource Allocation"));
-    os->addSubPage(new ui::BankersPage(), QStringLiteral("Deadlock Avoidance"));
-    os->addSubPage(new ui::ConceptGuidePage(ui::ConceptGuidePage::Topic::OperatingSystems), QStringLiteral("OS Concept Guide"));
-    connect(scheduler, &ui::SchedulerPage::scheduleComputed, processes, &ui::ProcessStatePage::showSchedule);
+    auto* os = new ui::OsSimulatorPage();
 
     auto* dbms = new ui::ModulePage();
     dbms->addSubPage(new ui::DbOverviewPage(s), QStringLiteral("Database Overview"));
@@ -187,15 +176,7 @@ void MainWindow::buildStudentPages(const QString& studentId)
     auto* home = new ui::StudentHomePage(s, studentId);
     auto* session = new ui::StudentPortalPage(s, studentId);
 
-    auto* scheduler = new ui::SchedulerPage(s);
-    scheduler->setStudentScope(studentId);
-    auto* processes = new ui::ProcessStatePage();
-    auto* os = new ui::ModulePage();
-    os->addSubPage(processes, QStringLiteral("Process Management"));
-    os->addSubPage(scheduler, QStringLiteral("CPU Scheduling"));
-    os->addSubPage(new ui::BankersPage(), QStringLiteral("Deadlock Avoidance"));
-    os->addSubPage(new ui::ConceptGuidePage(ui::ConceptGuidePage::Topic::OperatingSystems), QStringLiteral("OS Concept Guide"));
-    connect(scheduler, &ui::SchedulerPage::scheduleComputed, processes, &ui::ProcessStatePage::showSchedule);
+    auto* os = new ui::OsSimulatorPage();
 
     addPage(QStringLiteral("Dashboard"), home);
     addPage(QStringLiteral("My Session"), session);

@@ -133,12 +133,10 @@ OpResult SessionService::allocateComputer(const QString& studentIdIn, const QStr
         const int mine = q.value(1).toInt();
         q.finish();
         if (mine > 0)
-            return wf.fail(QStringLiteral("Student %1 is waiting in the lab queue; the next free computer will be "
-                                          "assigned from the queue.")
+            return wf.fail(QStringLiteral("Student %1 is waiting in the queue.")
                                .arg(studentId));
         if (waiting > 0)
-            return wf.fail(QStringLiteral("%1 student(s) are waiting in the lab queue, so free computers are assigned "
-                                          "from the queue rather than directly.")
+            return wf.fail(QStringLiteral("%1 student(s) are waiting; free computers go to the queue first.")
                                .arg(waiting));
         wf.step(QStringLiteral("  ✓ nobody is waiting in the lab queue"));
     }

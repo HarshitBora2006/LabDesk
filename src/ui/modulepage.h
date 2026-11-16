@@ -1,6 +1,6 @@
 #pragma once
 // A sidebar entry that groups several pages behind a row of sub-navigation
-// tabs (e.g. OS Management: Process Management, CPU Scheduling, ...).
+// tabs (e.g. Computer Management: Computers, Maintenance).
 // Only the visible sub-page is refreshed; changes in any sub-page propagate.
 
 #include "page.h"

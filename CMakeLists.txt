@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.19)
 
 project(LabDesk
-    VERSION 0.8.0
-    DESCRIPTION "Smart Computer Lab Management and CPU Scheduling System"
+    VERSION 0.9.3
+    DESCRIPTION "Computer Lab Management System"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -30,8 +30,8 @@ add_library(labdesk_os STATIC
     src/processstate.h
     src/labqueue.cpp
     src/labqueue.h
-    src/bankers.cpp
-    src/bankers.h
+    src/ossimulator.cpp
+    src/ossimulator.h
 )
 target_include_directories(labdesk_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 labdesk_set_warnings(labdesk_os)
@@ -74,8 +74,7 @@ set(LABDESK_UI_SOURCES
     src/ui/layouthelpers.cpp           src/ui/layouthelpers.h
     src/ui/loginpage.cpp               src/ui/loginpage.h
     src/ui/modulepage.cpp              src/ui/modulepage.h
-    src/ui/bankerspage.cpp             src/ui/bankerspage.h
-    src/ui/resourceallocationpage.cpp  src/ui/resourceallocationpage.h
+    src/ui/ossimulatorpage.cpp         src/ui/ossimulatorpage.h
     src/ui/conceptguidepage.cpp        src/ui/conceptguidepage.h
     src/ui/dboverviewpage.cpp          src/ui/dboverviewpage.h
     src/ui/schemapage.cpp              src/ui/schemapage.h
@@ -91,10 +90,7 @@ set(LABDESK_UI_SOURCES
     src/ui/sessionspage.cpp            src/ui/sessionspage.h
     src/ui/labqueuepage.cpp            src/ui/labqueuepage.h
     src/ui/studentportalpage.cpp       src/ui/studentportalpage.h
-    src/ui/schedulerpage.cpp           src/ui/schedulerpage.h
     src/ui/ganttchartwidget.cpp        src/ui/ganttchartwidget.h
-    src/ui/processstatepage.cpp        src/ui/processstatepage.h
-    src/ui/statediagramwidget.cpp      src/ui/statediagramwidget.h
 )
 
 add_executable(labdesk WIN32 MACOSX_BUNDLE
@@ -122,6 +118,11 @@ if(LABDESK_BUILD_TESTS)
     target_link_libraries(scheduler_tests PRIVATE labdesk_os)
     labdesk_set_warnings(scheduler_tests)
     add_test(NAME scheduler_tests COMMAND scheduler_tests)
+
+    add_executable(ossimulator_tests tests/ossimulator_tests.cpp)
+    target_link_libraries(ossimulator_tests PRIVATE labdesk_os)
+    labdesk_set_warnings(ossimulator_tests)
+    add_test(NAME ossimulator_tests COMMAND ossimulator_tests)
 
     add_executable(os_extra_tests tests/os_extra_tests.cpp)
     target_link_libraries(os_extra_tests PRIVATE labdesk_os)

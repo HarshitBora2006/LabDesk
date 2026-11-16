@@ -73,14 +73,7 @@ LabQueuePage::LabQueuePage(Services& services, QWidget* parent) : Page(parent), 
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("Allocation Management"),
-                                       QStringLiteral("Allocate computers, run the waiting queue and see the measured "
-                                                      "waiting and usage times of real visits."));
-    root->addWidget(makeExplainer(QStringLiteral(
-        "This applies CPU-scheduling ideas to the lab itself: each student request is a job and each computer is a "
-        "processor. Arrival is the moment a student requests a computer, waiting is the time until one is assigned, "
-        "and burst is the actual session length, measured when the session ends. Nothing here is typed in or "
-        "simulated except the what-if replay at the bottom. Sessions are never interrupted, so every policy is "
-        "non-preemptive.")));
+                                       QStringLiteral("Allocate computers and manage the waiting queue"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
     root->addWidget(buildAllocateCard());
@@ -105,10 +98,6 @@ QWidget* LabQueuePage::buildAllocateCard()
     QFrame* card = makeCard();
     QVBoxLayout* layout = cardLayout(card);
     layout->addWidget(makeLabel(QStringLiteral("Allocate a computer to a student"), QStringLiteral("sectionTitle")));
-    layout->addWidget(makeLabel(QStringLiteral("Runs the same transaction as the student portal: the request (arrival) "
-                                               "and the session start are recorded together. Refused while students "
-                                               "are waiting, because free computers then go to the queue."),
-                                QStringLiteral("caption")));
     auto* row = new QHBoxLayout();
     row->setSpacing(10);
     m_allocStudent = new QComboBox();
@@ -198,11 +187,9 @@ QWidget* LabQueuePage::buildPolicyCard()
     auto* apply = makeButton(QStringLiteral("Apply policy"), QStringLiteral("primary"));
     row->addWidget(apply);
     layout->addLayout(row);
-    m_policyHelp = makeExplainer(QString());
+    m_policyHelp = makeLabel(QString(), QStringLiteral("caption"));
     layout->addWidget(m_policyHelp);
-    layout->addWidget(makeLabel(QStringLiteral("Priority comes from the purpose a student chooses: exam 1, assignment "
-                                               "2, practice 3 (lower number = served first). Ties always go to the "
-                                               "earlier request."),
+    layout->addWidget(makeLabel(QStringLiteral("Priority: exam 1, assignment 2, practice 3."),
                                 QStringLiteral("caption")));
     connect(m_policy, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &LabQueuePage::onPolicyChosen);
     connect(apply, &QPushButton::clicked, this, &LabQueuePage::onApplyPolicy);
@@ -243,12 +230,6 @@ QWidget* LabQueuePage::buildMeasuredCard()
     QVBoxLayout* layout = cardLayout(card);
     layout->setSpacing(12);
     layout->addWidget(makeLabel(QStringLiteral("Measured results"), QStringLiteral("sectionTitle")));
-    layout->addWidget(makeLabel(QStringLiteral("Averages use finished visits only, because the burst (actual session "
-                                               "length) is unknown until a session ends. Estimate error = actual "
-                                               "length minus the student's expected length: negative means the "
-                                               "visit was shorter than expected. The average uses the size of each "
-                                               "error, so over- and under-estimates do not cancel out."),
-                                QStringLiteral("caption")));
     auto* grid = new ResponsiveGrid(150, 12);
     QList<QWidget*> tiles;
     const QPair<QString, QString> names[] = {{QStringLiteral("visits"), QStringLiteral("Finished visits")},
@@ -292,10 +273,7 @@ QWidget* LabQueuePage::buildReplayCard()
     QVBoxLayout* layout = cardLayout(card);
     layout->addWidget(makeLabel(QStringLiteral("What-if replay"), QStringLiteral("sectionTitle")));
     layout->addWidget(makeLabel(
-        QStringLiteral("Replays every finished visit with its recorded arrival time and actual length under each "
-                       "policy, on a chosen number of identical computers that never break down. SJF decides with "
-                       "the expected length, exactly like the live queue. This is a simulation for comparison; the "
-                       "table above is what really happened."),
+        QStringLiteral("Replays finished visits under each policy."),
         QStringLiteral("caption")));
     auto* row = new QHBoxLayout();
     row->setSpacing(10);
@@ -359,7 +337,7 @@ void LabQueuePage::onApplyPolicy()
         return;
     const OpResult r = m_services.queue.setPolicy(*p);
     if (r.ok)
-        m_banner->showSuccess(r.message + QStringLiteral(" The waiting list below is re-ordered accordingly."));
+        m_banner->showSuccess(r.message);
     else
         m_banner->showError(r.message);
     emit dataChanged();
@@ -388,8 +366,7 @@ void LabQueuePage::refreshQueue()
         showErrorState(m_queueState, error);
     } else if (queue.empty()) {
         m_queue->hide();
-        showEmptyState(m_queueState, QStringLiteral("No students are waiting. Students join the queue from the "
-                                                    "Student portal when every computer is busy."));
+        showEmptyState(m_queueState, QStringLiteral("No students waiting."));
     } else {
         m_queue->show();
         m_queueState->hide();
@@ -454,10 +431,7 @@ void LabQueuePage::refreshMeasured()
         showErrorState(m_historyState, error);
     } else if (records.empty()) {
         m_history->hide();
-        showEmptyState(m_historyState, QStringLiteral("No requests recorded yet. Data appears when students request "
-                                                      "computers in the Student portal. Sessions started before "
-                                                      "version 0.7 or from the transaction demonstration have no "
-                                                      "request, so they have no arrival time and are not shown."));
+        showEmptyState(m_historyState, QStringLiteral("No requests recorded yet."));
     } else {
         m_history->show();
         m_historyState->hide();
@@ -470,7 +444,7 @@ void LabQueuePage::onRemoveRequest()
     if (!id.isValid())
         return;
     if (!confirm(this, QStringLiteral("Remove request"),
-                 QStringLiteral("Remove request #%1 from the queue? It is kept as a cancelled request.")
+                 QStringLiteral("Remove request #%1 from the queue?")
                      .arg(id.toLongLong()),
                  QStringLiteral("Remove request"))) {
         return;
@@ -537,8 +511,7 @@ void LabQueuePage::onReplay()
     }
     m_replay->show();
     m_replayState->hide();
-    m_banner->showInfo(QStringLiteral("Replayed %1 finished visit(s) on %2 computer(s). Lower waiting is better; "
-                                      "compare the longest wait to see which policy risks starvation.")
+    m_banner->showInfo(QStringLiteral("Replayed %1 visit(s) on %2 computer(s).")
                            .arg(static_cast<int>(jobs.size()))
                            .arg(m_computers->value()));
 }

@@ -4,6 +4,7 @@
 // Command line:
 //   labdesk [--db <path>] [--no-seed]
 
+#include "adminservice.h"
 #include "database.h"
 #include "mainwindow.h"
 #include "ui/theme.h"
@@ -18,7 +19,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("LabDesk"));
     QApplication::setOrganizationName(QStringLiteral("LabDesk"));
-    QApplication::setApplicationVersion(QStringLiteral("0.8.0"));
+    QApplication::setApplicationVersion(QStringLiteral("0.9.3"));
     QApplication::setStyle(QStringLiteral("Fusion"));
 
     QFont font = QApplication::font();
@@ -38,7 +39,11 @@ int main(int argc, char* argv[])
     const QCommandLineOption noSeedOption(QStringList{QStringLiteral("no-seed")},
                                           QStringLiteral("Do not insert demo data into an empty database."));
     parser.addOption(dbOption);
+    const QCommandLineOption resetAdminOption(QStringList{QStringLiteral("reset-admin")},
+                                              QStringLiteral("Remove all administrator accounts so a new one can be "
+                                                             "created on the login screen."));
     parser.addOption(noSeedOption);
+    parser.addOption(resetAdminOption);
     parser.process(app);
 
     const QString path = parser.isSet(dbOption) ? parser.value(dbOption) : labdesk::Database::defaultFilePath();
@@ -53,6 +58,18 @@ int main(int argc, char* argv[])
         QMessageBox::warning(nullptr, QStringLiteral("Demo data"),
                              QStringLiteral("Demo data could not be added; continuing with an empty database.\n\n%1")
                                  .arg(error));
+    }
+
+    if (parser.isSet(resetAdminOption)) {
+        const auto answer = QMessageBox::question(
+            nullptr, QStringLiteral("Reset administrator"),
+            QStringLiteral("Remove all administrator accounts? Students, computers and sessions are kept. You can "
+                           "then create a new administrator with Admin Login."));
+        if (answer == QMessageBox::Yes) {
+            const labdesk::OpResult r = labdesk::AdminService(db).removeAllAdmins();
+            if (!r.ok)
+                QMessageBox::warning(nullptr, QStringLiteral("Reset administrator"), r.message);
+        }
     }
 
     labdesk::MainWindow window(db);  // destroyed before `db`, so no dangling connections

@@ -26,9 +26,8 @@ SessionsPage::SessionsPage(Database& db, Services& services, Mode mode, QWidget*
     const bool history = mode == Mode::History;
     QVBoxLayout* root = makePageLayout(
         this, history ? QStringLiteral("Usage logs") : QStringLiteral("Transactions and integrity"),
-        history ? QStringLiteral("Every lab session ever started, newest first. Ended sessions are permanent history.")
-                : QStringLiteral("Allocation and session end are single SQLite transactions. Run them here step by "
-                                 "step and watch COMMIT or ROLLBACK."));
+        history ? QStringLiteral("All lab sessions")
+                : QStringLiteral("Step-by-step COMMIT and ROLLBACK"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
     QFrame* card = makeCard();
@@ -59,9 +58,6 @@ QWidget* SessionsPage::buildHistoryTab()
     layout->addWidget(m_table, 1);
     m_empty = makeStateMessage();
     layout->addWidget(m_empty);
-    layout->addWidget(makeLabel(QStringLiteral("Ended sessions are kept permanently: database triggers reject any "
-                                               "attempt to modify or delete them."),
-                                QStringLiteral("caption")));
 
     connect(m_activeOnly, &QCheckBox::toggled, this, [this]() { reloadHistory(); });
     connect(m_table, &QTableWidget::itemSelectionChanged, this, [this]() {
@@ -86,13 +82,6 @@ QWidget* SessionsPage::buildTransactionTab()
     auto* layout = new QVBoxLayout(tab);
     layout->setContentsMargins(14, 14, 14, 14);
     layout->setSpacing(10);
-    layout->addWidget(makeExplainer(
-        QStringLiteral("Runs the same SessionService code the student portal uses and prints each step. "
-                       "Bound values are shown inline for readability; the real statements use prepared "
-                       "placeholders (?). Turn on the injected failure to make the session INSERT fail after "
-                       "the computer UPDATE has already run, then check that ROLLBACK left the computer "
-                       "AVAILABLE. Integrity rules also live in the database itself: foreign keys, CHECK "
-                       "constraints, partial unique indexes and triggers (see Schema and Relationships).")));
 
     auto* controls = new QHBoxLayout();
     m_demoStudent = new QComboBox();

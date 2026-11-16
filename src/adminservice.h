@@ -35,6 +35,9 @@ public:
 
     std::optional<AdminAccount> authenticate(const QString& adminId, const QString& password,
                                              QString* error = nullptr) const;
+    // Used by "labdesk --reset-admin": removes every administrator so the login
+    // screen offers to create a new one. Requires access to the computer.
+    OpResult removeAllAdmins() const;
     OpResult changePassword(const QString& adminId, const QString& currentPassword, const QString& newPassword) const;
 
     static QString validate(const QString& adminId, const QString& name, const QString& password);

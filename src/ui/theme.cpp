@@ -29,9 +29,7 @@ StatusColors statusColors(const QString& status)
         {QStringLiteral("TERMINATED"), {QColor("#E2E8F0"), QColor("#334155")}},
         {QStringLiteral("CANCELLED"), {QColor("#F1F5F9"), QColor("#475569")}},
         {QStringLiteral("ALLOCATED"), {QColor("#DCFCE7"), QColor("#166534")}},
-        // Banker's results
-        {QStringLiteral("SAFE"), {QColor("#DCFCE7"), QColor("#166534")}},
-        {QStringLiteral("UNSAFE"), {QColor("#FEE2E2"), QColor("#991B1B")}},
+
     };
     return map.value(status, {QColor("#F1F5F9"), QColor("#1E293B")});
 }

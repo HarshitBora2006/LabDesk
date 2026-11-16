@@ -22,8 +22,7 @@ MaintenancePage::MaintenancePage(Services& services, QWidget* parent) : Page(par
 {
     QVBoxLayout* root = makePageLayout(
         this, QStringLiteral("Maintenance"),
-        QStringLiteral("Reporting an issue takes a computer out of service. It returns to AVAILABLE only when "
-                       "its last open issue is resolved."));
+        QStringLiteral("Report and resolve computer issues"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
@@ -41,9 +40,6 @@ MaintenancePage::MaintenancePage(Services& services, QWidget* parent) : Page(par
     row->addWidget(m_description, 1);
     row->addWidget(reportButton);
     report->addLayout(row);
-    report->addWidget(makeLabel(QStringLiteral("Computers in use are listed but cannot be chosen: end the "
-                                               "session first."),
-                                QStringLiteral("muted")));
     root->addWidget(reportCard);
 
     QFrame* historyCard = makeCard();
@@ -138,9 +134,8 @@ void MaintenancePage::refresh()
     } else if (records.empty()) {
         m_table->hide();
         showEmptyState(m_empty, m_openOnly->isChecked()
-                                    ? QStringLiteral("No active maintenance issues. Every computer is in service.")
-                                    : QStringLiteral("No maintenance issues have been recorded yet. Use \"Report "
-                                                     "issue\" above when a computer needs repair."));
+                                    ? QStringLiteral("No active maintenance issues.")
+                                    : QStringLiteral("No maintenance issues recorded."));
     } else {
         m_table->show();
         m_empty->hide();
@@ -204,8 +199,7 @@ void MaintenancePage::onResolve()
     if (!id.isValid())
         return;
     if (!confirm(this, QStringLiteral("Resolve issue"),
-                 QStringLiteral("Mark issue #%1 as resolved? The computer is released only if no other open "
-                                "issue or active session remains.")
+                 QStringLiteral("Mark issue #%1 as resolved?")
                      .arg(id.toLongLong()),
                  QStringLiteral("Mark resolved"))) {
         return;

@@ -84,7 +84,7 @@ DashboardPage::DashboardPage(Services& services, QWidget* parent) : Page(parent)
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(
         body, QStringLiteral("Dashboard"),
-        QStringLiteral("Live figures read from the database each time this page is shown or data changes."));
+        QStringLiteral("Overview of the computer lab"));
 
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
@@ -222,8 +222,7 @@ void DashboardPage::refresh()
         m_legend.value(ComputerStatus::Available)->setText(QStringLiteral("%1 (%2)").arg(s.available).arg(percent(s.available, s.totalComputers)));
         m_legend.value(ComputerStatus::Occupied)->setText(QStringLiteral("%1 (%2)").arg(s.occupied).arg(percent(s.occupied, s.totalComputers)));
         m_legend.value(ComputerStatus::Maintenance)->setText(QStringLiteral("%1 (%2)").arg(s.maintenance).arg(percent(s.maintenance, s.totalComputers)));
-        m_labsCaption->setText(QStringLiteral("%1 laborator%2 (each is a distinct computer location). Occupancy = "
-                                              "computers in use / all computers in that laboratory.")
+        m_labsCaption->setText(QStringLiteral("%1 laborator%2")
                                    .arg(s.laboratories)
                                    .arg(s.laboratories == 1 ? QStringLiteral("y") : QStringLiteral("ies")));
     }
@@ -233,9 +232,7 @@ void DashboardPage::refresh()
     if (!consistencyError.isEmpty())
         m_consistency->showError(QStringLiteral("Consistency check could not run: ") + consistencyError);
     else if (problems.isEmpty())
-        m_consistency->showSuccess(QStringLiteral("Consistency check passed. Every occupied computer has exactly one "
-                                                  "active session, and every computer under maintenance has an open "
-                                                  "issue."));
+        m_consistency->clearMessage();
     else
         m_consistency->showWarning(QStringLiteral("Consistency problems found:\n") + problems.join(QLatin1Char('\n')));
 
@@ -266,8 +263,7 @@ void DashboardPage::refreshActivity()
         showErrorState(m_activityState, error);
     } else if (items.empty()) {
         m_activity->hide();
-        showEmptyState(m_activityState, QStringLiteral("No activity yet. Sessions, maintenance reports and queue "
-                                                       "requests appear here as they happen."));
+        showEmptyState(m_activityState, QStringLiteral("No activity yet."));
     } else {
         m_activity->show();
         m_activityState->hide();
@@ -352,8 +348,7 @@ void DashboardPage::refreshLabs(const QHash<QString, QString>& usedBy)
     if (labs.empty()) {
         m_labs->setWidgets({});
         m_labs->hide();
-        showEmptyState(m_labsState, QStringLiteral("No laboratories yet. Add computers on the Computers page; each "
-                                                   "distinct location becomes a laboratory here."));
+        showEmptyState(m_labsState, QStringLiteral("No computers added yet."));
         return;
     }
     QString listError;
@@ -392,8 +387,7 @@ void DashboardPage::refreshActiveSessions()
     }
     if (active.empty()) {
         m_activeTable->hide();
-        showEmptyState(m_activeState, QStringLiteral("No active computer sessions. Students start one from the "
-                                                     "Student portal."));
+        showEmptyState(m_activeState, QStringLiteral("No active sessions."));
     } else {
         m_activeTable->show();
         m_activeState->hide();

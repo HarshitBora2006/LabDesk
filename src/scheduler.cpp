@@ -28,21 +28,11 @@ bool isPreemptive(Algorithm algorithm)
 std::string algorithmDescription(Algorithm algorithm)
 {
     switch (algorithm) {
-    case Algorithm::FCFS:
-        return "First Come First Serve runs processes in the order they arrive. Each one keeps the CPU "
-               "until its burst finishes (non-preemptive). Simple, but short jobs can wait behind long ones.";
-    case Algorithm::SJF:
-        return "Shortest Job First picks, among processes that have already arrived, the one with the "
-               "smallest burst time, and lets it finish (non-preemptive). Ties go to the earlier arrival.";
-    case Algorithm::SRTF:
-        return "Shortest Remaining Time First is the preemptive form of SJF. When a process arrives with a "
-               "remaining time strictly shorter than the running process, it takes the CPU immediately.";
-    case Algorithm::Priority:
-        return "Priority scheduling runs the arrived process with the best priority. Here a LOWER number "
-               "means a HIGHER priority (0 is best). Non-preemptive; ties go to the earlier arrival.";
-    case Algorithm::RoundRobin:
-        return "Round Robin gives each ready process at most one time quantum, then moves it to the back "
-               "of the ready queue (preemptive time sharing). Smaller quanta mean more context switches.";
+    case Algorithm::FCFS: return "Runs processes in arrival order. Non-preemptive.";
+    case Algorithm::SJF: return "Runs the shortest arrived job first. Non-preemptive.";
+    case Algorithm::SRTF: return "Runs the job with the shortest remaining time. Preemptive.";
+    case Algorithm::Priority: return "Runs the highest priority first (lower number = higher). Non-preemptive.";
+    case Algorithm::RoundRobin: return "Each process runs for one time quantum in turn. Preemptive.";
     }
     return {};
 }

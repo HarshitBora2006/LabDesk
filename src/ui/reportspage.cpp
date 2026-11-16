@@ -44,20 +44,18 @@ ReportsPage::ReportsPage(Services& services, QWidget* parent) : Page(parent), m_
 {
     m_body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(m_body, QStringLiteral("Reports"),
-                                       QStringLiteral("Usage summaries calculated by SQL from real session and "
-                                                      "request records. Durations are h:mm:ss or m:ss."));
+                                       QStringLiteral("Lab usage summaries"));
     m_labs = addSection(QStringLiteral("Usage by laboratory"), QStringLiteral("Finished sessions only."),
                         {QStringLiteral("Laboratory"), QStringLiteral("Sessions"), QStringLiteral("Total time"),
                          QStringLiteral("Average session")});
-    m_days = addSection(QStringLiteral("Last 14 days"), QStringLiteral("Grouped by the local date a session started."),
+    m_days = addSection(QStringLiteral("Last 14 days"), QStringLiteral("By start date."),
                         {QStringLiteral("Date"), QStringLiteral("Sessions"), QStringLiteral("Total time"),
                          QStringLiteral("Average session")});
     m_students = addSection(QStringLiteral("Most active students"), QStringLiteral("Top 10 by total time."),
                             {QStringLiteral("Student"), QStringLiteral("Sessions"), QStringLiteral("Total time"),
                              QStringLiteral("Average session")});
     m_queue = addSection(QStringLiteral("Waiting time by allocation rule"),
-                         QStringLiteral("IMMEDIATE = a computer was free; otherwise the queue policy that chose the "
-                                        "student."),
+                         QStringLiteral("IMMEDIATE means no wait."),
                          {QStringLiteral("Granted by"), QStringLiteral("Requests"), QStringLiteral("Average wait"),
                           QStringLiteral("Longest wait")});
     root->addStretch(1);
@@ -109,7 +107,7 @@ void ReportsPage::refresh()
     ok = m_services.reports.queueByPolicy(queue, &error);
     QTableWidget* qt = m_queue.table;
     fill(qt, m_queue.state, ok, error, queue,
-         QStringLiteral("No requests have been allocated yet. They appear when students use the Student portal."),
+         QStringLiteral("No allocated requests yet."),
          [qt](int r, const QueueRow& q) {
              qt->setItem(r, 0, makeItem(q.grantedBy));
              qt->setItem(r, 1, makeNumberItem(q.requests));

@@ -76,8 +76,7 @@ OpResult MaintenanceService::reportIssue(const QString& computerIdIn, const QStr
         status = q.value(0).toString();
     }
     if (status == ComputerStatus::Occupied) {
-        return OpResult::failure(QStringLiteral("Computer %1 is in use by an active session. End the session "
-                                                "before placing it into maintenance.")
+        return OpResult::failure(QStringLiteral("Computer %1 is in use. End the session first.")
                                      .arg(computerId));
     }
     qint64 newId = -1;

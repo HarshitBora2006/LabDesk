@@ -84,15 +84,7 @@ BankersPage::BankersPage(QWidget* parent) : Page(parent)
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("Deadlock Avoidance"),
-                                       QStringLiteral("Banker's Algorithm on a simulated system of processes and "
-                                                      "resource types."));
-    root->addWidget(makeExplainer(QStringLiteral(
-        "SAFE: there is an order (a safe sequence) in which every process can get its remaining need and finish.\n"
-        "UNSAFE: no such order is guaranteed. This is not yet a deadlock; it means the system can no longer promise "
-        "to avoid one.\n"
-        "DEADLOCK: processes are actually blocked forever, each waiting for resources another one holds.\n"
-        "The Banker's Algorithm avoids deadlock by granting a request only if the resulting state is still safe. "
-        "Need = Maximum - Allocation. When several processes could finish, the lowest-numbered one is chosen.")));
+                                       QStringLiteral("Banker's Algorithm"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
@@ -119,8 +111,7 @@ BankersPage::BankersPage(QWidget* parent) : Page(parent)
 
     m_available = matrixTable(true, this);
     m_available->setFixedHeight(32 + 34);
-    root->addWidget(titledCard(QStringLiteral("Available"), QStringLiteral("Free instances of each resource type. "
-                                                                         "Double-click a cell to edit."),
+    root->addWidget(titledCard(QStringLiteral("Available"), QStringLiteral("Double-click a cell to edit."),
                                m_available));
     auto* matrices = new QGridLayout();
     matrices->setHorizontalSpacing(16);
@@ -175,9 +166,7 @@ BankersPage::BankersPage(QWidget* parent) : Page(parent)
     requestRow->addWidget(request);
     requestRow->addWidget(release);
     root->addWidget(titledCard(QStringLiteral("Resource request and release"),
-                               QStringLiteral("Request: refused if above the process's need, waits if above Available, "
-                                              "otherwise granted only if the new state is safe. Release returns "
-                                              "resources the process holds."),
+                               QStringLiteral("Granted only if the system stays safe."),
                                requestBox));
     root->addStretch(1);
 
@@ -185,8 +174,7 @@ BankersPage::BankersPage(QWidget* parent) : Page(parent)
             [this]() { resizeTables(m_processCount->value(), m_resourceCount->value()); });
     connect(example, &QPushButton::clicked, this, [this]() {
         loadState(os::textbookBankersExample());
-        m_banner->showInfo(QStringLiteral("Loaded the 5-process, 3-resource example from Silberschatz, Operating "
-                                          "System Concepts."));
+        m_banner->showInfo(QStringLiteral("Loaded the textbook example."));
     });
     connect(check, &QPushButton::clicked, this, &BankersPage::onCheckSafety);
     connect(request, &QPushButton::clicked, this, [this]() { onRequest(false); });
@@ -302,16 +290,13 @@ void BankersPage::showSafety(const os::SafetyResult& r, const os::BankersState& 
     for (int p : r.sequence)
         order << QStringLiteral("P%1").arg(p);
     if (r.safe) {
-        m_sequence->setText(QStringLiteral("Safe sequence: %1. Following this order, every process can obtain its "
-                                           "remaining need, finish and release what it holds.")
+        m_sequence->setText(QStringLiteral("Safe sequence: %1")
                                 .arg(order.join(QStringLiteral(" -> "))));
     } else {
         QStringList stuck;
         for (int p : r.unfinished)
             stuck << QStringLiteral("P%1").arg(p);
-        m_sequence->setText(QStringLiteral("No safe sequence. %1 can finish, but %2 cannot be guaranteed their "
-                                           "remaining need. The system is not necessarily deadlocked yet, but a "
-                                           "deadlock can no longer be ruled out.")
+        m_sequence->setText(QStringLiteral("No safe sequence. %1 can finish; %2 cannot. A deadlock is possible but has not happened yet.")
                                 .arg(order.isEmpty() ? QStringLiteral("No process") : order.join(QStringLiteral(", ")),
                                      stuck.join(QStringLiteral(", "))));
     }

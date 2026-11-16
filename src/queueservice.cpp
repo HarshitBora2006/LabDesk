@@ -191,7 +191,7 @@ OpResult QueueService::setPolicy(lab::Policy policy) const
     q.addBindValue(QString::fromLatin1(lab::policyCode(policy)));
     if (!q.exec())
         return OpResult::failure(friendlySqlError(q.lastError()));
-    return OpResult::success(QStringLiteral("Queue policy set to %1. It decides who gets the next free computer.")
+    return OpResult::success(QStringLiteral("Queue policy set to %1.")
                                  .arg(QString::fromStdString(lab::policyName(policy))));
 }
 
@@ -287,8 +287,7 @@ OpResult QueueService::startNow(const QString& studentIdIn, const QString& compu
     if (waiting < 0)
         return OpResult::failure(error);
     if (waiting > 0) {
-        return OpResult::failure(QStringLiteral("%1 student(s) are already waiting, so computers are assigned from "
-                                                "the queue. Join the queue instead.")
+        return OpResult::failure(QStringLiteral("%1 student(s) are waiting. Join the queue instead.")
                                      .arg(waiting));
     }
     const QString now = timeutil::nowUtc();
@@ -300,12 +299,7 @@ OpResult QueueService::startNow(const QString& studentIdIn, const QString& compu
         return OpResult::failure(error);
     if (!tx.commit())
         return OpResult::failure(QStringLiteral("Commit failed: ") + tx.lastError());
-    return OpResult::success(QStringLiteral("You are now using %1. Request #%2 recorded at %3; you waited 0 minutes. "
-                                            "Your actual session length is measured when you end the session.")
-                                 .arg(computerId)
-                                 .arg(requestId)
-                                 .arg(timeutil::toDisplay(now)),
-                             sessionId);
+    return OpResult::success(QStringLiteral("You are now using %1.").arg(computerId), sessionId);
 }
 
 OpResult QueueService::joinQueue(const QString& studentIdIn, const QString& purposeCode, int expectedMinutes) const
@@ -350,10 +344,7 @@ OpResult QueueService::joinQueue(const QString& studentIdIn, const QString& purp
                 return OpResult::failure(error);
             if (!tx.commit())
                 return OpResult::failure(QStringLiteral("Commit failed: ") + tx.lastError());
-            return OpResult::success(QStringLiteral("A computer was free, so you did not have to wait: you are now "
-                                                    "using %1.")
-                                         .arg(freeComputer),
-                                     sessionId);
+            return OpResult::success(QStringLiteral("You are now using %1.").arg(freeComputer), sessionId);
         }
     }
 
@@ -376,14 +367,9 @@ OpResult QueueService::joinQueue(const QString& studentIdIn, const QString& purp
 
     int length = 0;
     const auto entry = waitingEntryFor(studentId, &length);
-    const QString policyText = QString::fromStdString(lab::policyName(policy()));
-    return OpResult::success(QStringLiteral("You joined the queue at %1 (request #%2). You are number %3 of %4 under "
-                                            "the %5 policy; the next free computer is assigned automatically.")
-                                 .arg(timeutil::toDisplay(now))
-                                 .arg(requestId)
+    return OpResult::success(QStringLiteral("You joined the queue: number %1 of %2.")
                                  .arg(entry ? entry->position : 0)
-                                 .arg(length)
-                                 .arg(policyText),
+                                 .arg(length),
                              requestId);
 }
 
@@ -398,7 +384,7 @@ OpResult QueueService::cancelWaiting(const QString& studentId) const
         return OpResult::failure(friendlySqlError(q.lastError()));
     if (q.numRowsAffected() != 1)
         return OpResult::failure(QStringLiteral("You are not waiting in the queue."));
-    return OpResult::success(QStringLiteral("You left the queue. The request is kept as cancelled history."));
+    return OpResult::success(QStringLiteral("You left the queue."));
 }
 
 OpResult QueueService::cancelRequest(qint64 requestId) const

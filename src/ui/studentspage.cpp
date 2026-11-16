@@ -18,7 +18,7 @@ namespace labdesk::ui {
 StudentsPage::StudentsPage(Services& services, QWidget* parent) : Page(parent), m_services(services)
 {
     QVBoxLayout* root = makePageLayout(this, QStringLiteral("Students"),
-                                       QStringLiteral("Register students who may sign in to the student portal."));
+                                       QStringLiteral("Registered students"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
@@ -76,9 +76,6 @@ StudentsPage::StudentsPage(Services& services, QWidget* parent) : Page(parent), 
     buttons->addWidget(clear);
     formBox->addLayout(buttons);
     formBox->addWidget(m_delete, 0, Qt::AlignLeft);
-    formBox->addWidget(makeLabel(QStringLiteral("Students with session history cannot be deleted; their "
-                                                "records are kept for auditing."),
-                                 QStringLiteral("muted")));
     formBox->addStretch();
     body->addWidget(formCard, 2);
     root->addLayout(body, 1);

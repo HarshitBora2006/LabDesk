@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
@@ -111,11 +112,8 @@ QWidget* LoginPage::buildBrandPanel()
     layout->addWidget(makeLabel(QStringLiteral("LabDesk"), QStringLiteral("loginTitle")));
     layout->addWidget(makeLabel(QStringLiteral("Computer Lab Management System"), QStringLiteral("loginSubtitle")));
     layout->addSpacing(18);
-    for (const QString& point :
-         {QStringLiteral("Administrators manage students, computers, allocations, usage logs and reports."),
-          QStringLiteral("Students request a computer, follow the waiting queue and end their session."),
-          QStringLiteral("The OS and DBMS modules show scheduling, process states, deadlock avoidance, "
-                         "transactions and the real database schema.")})
+    for (const QString& point : {QStringLiteral("Manage students and computers"), QStringLiteral("Allocate lab sessions"),
+                                 QStringLiteral("Learn OS and DBMS concepts")})
         layout->addWidget(makeLabel(point, QStringLiteral("loginPoint")));
     layout->addStretch(2);
     return panel;
@@ -139,6 +137,7 @@ QWidget* LoginPage::buildSignInForm()
     layout->addWidget(signIn);
     m_hint = makeLabel(QString(), QStringLiteral("caption"));
     layout->addWidget(m_hint);
+    layout->addStretch(1);
     connect(signIn, &QPushButton::clicked, this, &LoginPage::onSignIn);
     connect(m_password, &QLineEdit::returnPressed, this, &LoginPage::onSignIn);
     connect(m_id, &QLineEdit::returnPressed, this, [this]() { m_password->setFocus(); });
@@ -151,8 +150,7 @@ QWidget* LoginPage::buildSetupForm()
     auto* layout = new QVBoxLayout(form);
     layout->setContentsMargins(0, 4, 0, 0);
     layout->setSpacing(8);
-    layout->addWidget(makeLabel(QStringLiteral("No administrator account exists yet. Create the first one now; its "
-                                               "password is stored only as a salted hash."),
+    layout->addWidget(makeLabel(QStringLiteral("No administrator account yet. Create one to continue."),
                                 QStringLiteral("caption")));
     m_newId = new QLineEdit();
     m_newId->setPlaceholderText(QStringLiteral("e.g. labadmin"));
@@ -171,9 +169,22 @@ QWidget* LoginPage::buildSetupForm()
     layout->addSpacing(6);
     auto* create = makeButton(QStringLiteral("Create administrator and sign in"), QStringLiteral("primary"));
     layout->addWidget(create);
+    layout->addStretch(1);
     connect(create, &QPushButton::clicked, this, &LoginPage::onCreateAdmin);
     connect(m_confirmPassword, &QLineEdit::returnPressed, this, &LoginPage::onCreateAdmin);
     return form;
+}
+
+void LoginPage::showForm(int index)
+{
+    // A stacked widget is as tall as its tallest page; ignoring the hidden page's
+    // size lets the card shrink to the form that is actually shown.
+    for (int i = 0; i < m_forms->count(); ++i) {
+        const QSizePolicy::Policy policy = i == index ? QSizePolicy::Preferred : QSizePolicy::Ignored;
+        m_forms->widget(i)->setSizePolicy(policy, policy);
+    }
+    m_forms->setCurrentIndex(index);
+    m_forms->adjustSize();
 }
 
 bool LoginPage::adminSelected() const
@@ -191,14 +202,14 @@ void LoginPage::updateRole()
         if (admins < 0)
             m_banner->showError(QStringLiteral("Administrator accounts could not be read: ") + error);
         const bool setup = admins == 0;
-        m_forms->setCurrentIndex(setup ? 1 : 0);
+        showForm(setup ? 1 : 0);
         m_cardTitle->setText(setup ? QStringLiteral("Create administrator") : QStringLiteral("Admin sign in"));
         m_idLabel->setText(QStringLiteral("Admin ID"));
         m_id->setPlaceholderText(QStringLiteral("Your admin ID"));
         m_hint->setText(QString());
         m_hint->hide();
     } else {
-        m_forms->setCurrentIndex(0);
+        showForm(0);
         m_cardTitle->setText(QStringLiteral("Student sign in"));
         m_idLabel->setText(QStringLiteral("Student ID"));
         m_id->setPlaceholderText(QStringLiteral("Your student ID"));

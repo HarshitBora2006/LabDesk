@@ -439,6 +439,12 @@ int main(int argc, char* argv[])
               "writes work again after the console (query_only switched off)");
     }
 
+    std::cout << "Administrator reset (--reset-admin)\n";
+    check(s.admins.removeAllAdmins().ok && s.admins.adminCount() == 0, "reset removes every administrator account");
+    check(s.students.findStudent(QStringLiteral("S100")).has_value(), "reset keeps student data");
+    check(s.admins.createFirstAdmin(QStringLiteral("newadmin"), QStringLiteral("New Admin"), QStringLiteral("fresh-pass")).ok,
+          "after a reset the first administrator can be created again");
+
     std::cout << "TEST 13 - persistence after restart\n";
     const int sessionsBefore = scalar(*db, QStringLiteral("SELECT COUNT(*) FROM session"));
     services.reset();

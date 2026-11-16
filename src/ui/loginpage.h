@@ -34,6 +34,7 @@ private:
     QWidget* buildSignInForm();
     QWidget* buildSetupForm();
     bool adminSelected() const;
+    void showForm(int index);
     void updateRole();
     void onSignIn();
     void onCreateAdmin();

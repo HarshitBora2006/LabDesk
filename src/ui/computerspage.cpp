@@ -21,7 +21,7 @@ ComputersPage::ComputersPage(Services& services, QWidget* parent) : Page(parent)
 {
     QVBoxLayout* root = makePageLayout(
         this, QStringLiteral("Computers"),
-        QStringLiteral("Lab inventory. Status changes only through sessions and maintenance, never by hand."));
+        QStringLiteral("Lab computers and their status"));
     m_banner = new MessageBanner();
     root->addWidget(m_banner);
 
@@ -85,9 +85,6 @@ ComputersPage::ComputersPage(Services& services, QWidget* parent) : Page(parent)
     buttons->addWidget(clear);
     formBox->addLayout(buttons);
     formBox->addWidget(m_delete, 0, Qt::AlignLeft);
-    formBox->addWidget(makeLabel(QStringLiteral("A computer that appears in any session or maintenance record "
-                                                "cannot be deleted: the history must stay intact."),
-                                 QStringLiteral("muted")));
     formBox->addStretch();
     body->addWidget(formCard, 2);
     root->addLayout(body, 1);

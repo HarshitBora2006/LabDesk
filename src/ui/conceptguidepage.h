@@ -1,6 +1,5 @@
 #pragma once
-// Short viva-oriented guides: where each OS / DBMS concept is used in LabDesk
-// and which screen shows it. Only concepts that the code really implements.
+// DBMS Concept Guide: where each database concept is used in LabDesk.
 
 #include "page.h"
 
@@ -9,7 +8,7 @@ namespace labdesk::ui {
 class ConceptGuidePage : public Page {
     Q_OBJECT
 public:
-    enum class Topic { OperatingSystems, Databases };
+    enum class Topic { Databases };
     explicit ConceptGuidePage(Topic topic, QWidget* parent = nullptr);
 };
 

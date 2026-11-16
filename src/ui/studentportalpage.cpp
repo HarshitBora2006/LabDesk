@@ -110,11 +110,6 @@ QWidget* StudentPortalPage::buildDashboard()
     fields->addWidget(m_expected);
     fields->addStretch(1);
     bodyLayout->addLayout(fields);
-    bodyLayout->addWidget(makeLabel(QStringLiteral("Your purpose sets your priority if the lab is full (exam first, "
-                                                   "then assignment, then practice). Your expected length is used by "
-                                                   "the shortest-job-first policy. Your real waiting time and session "
-                                                   "length are recorded automatically."),
-                                    QStringLiteral("caption")));
 
     m_available = new QTableWidget();
     setupTable(m_available, {QStringLiteral("Computer ID"), QStringLiteral("Name"), QStringLiteral("Location"),
@@ -183,17 +178,14 @@ void StudentPortalPage::refresh()
         m_timerStart = session->startTime;
         m_timerPrefix = QStringLiteral("Time at the computer");
         m_visitSummary->setText(QStringLiteral("You are using %1").arg(session->computerId));
-        m_visitDetails->setText(QStringLiteral("%1, %2. Started %3. Your session length is measured when you press "
-                                               "End session.")
+        m_visitDetails->setText(QStringLiteral("%1, %2. Started %3.")
                                     .arg(session->computerName, session->location,
                                          timeutil::toDisplay(session->startTime)));
     } else if (m_waiting) {
         m_timerStart = entry->requestedAt;
         m_timerPrefix = QStringLiteral("Waiting for");
         m_visitSummary->setText(QStringLiteral("You are number %1 of %2 in the queue").arg(entry->position).arg(m_queueLength));
-        m_visitDetails->setText(QStringLiteral("Requested %1 for %2 (priority %3), expected %4 min. Policy: %5. The next "
-                                               "free computer is assigned automatically; this page updates when it "
-                                               "happens.")
+        m_visitDetails->setText(QStringLiteral("Requested %1 for %2, expected %4 min. Priority %3, policy %5.")
                                     .arg(timeutil::toDisplay(entry->requestedAt), entry->purpose.toLower())
                                     .arg(entry->priority)
                                     .arg(entry->expectedMinutes)
@@ -201,7 +193,7 @@ void StudentPortalPage::refresh()
     } else {
         m_timerStart.clear();
         m_visitSummary->setText(QStringLiteral("No active computer session."));
-        m_visitDetails->setText(QStringLiteral("Request a computer below. If none is free you can join the queue."));
+        m_visitDetails->setText(QStringLiteral("Request a computer below."));
     }
     m_endSession->setVisible(m_inSession);
     m_leaveQueue->setVisible(m_waiting);
@@ -233,14 +225,11 @@ void StudentPortalPage::refresh()
         showErrorState(m_noneAvailable, listError);
     } else if (computers.empty()) {
         m_available->hide();
-        showEmptyState(m_noneAvailable, QStringLiteral("No computers available for allocation. Join the waiting queue "
-                                                       "and the next free computer will be assigned to you under the "
-                                                       "%1 policy.")
+        showEmptyState(m_noneAvailable, QStringLiteral("No computers available. Join the queue (%1 policy).")
                                             .arg(policyName));
     } else if (m_queueLength > 0 && !m_waiting) {
         m_available->hide();
-        showEmptyState(m_noneAvailable, QStringLiteral("%1 student(s) are already waiting, so free computers are "
-                                                       "assigned from the queue. Join the queue to take your turn.")
+        showEmptyState(m_noneAvailable, QStringLiteral("%1 student(s) are waiting. Join the queue.")
                                             .arg(m_queueLength));
     } else {
         m_available->show();
@@ -254,12 +243,11 @@ void StudentPortalPage::updateRequestControls()
     const bool busy = m_inSession || m_waiting;
     m_requestBody->setEnabled(!busy);
     if (m_inSession)
-        m_requestHint->setText(QStringLiteral("You already have a computer. End your session before requesting "
-                                              "another one."));
+        m_requestHint->setText(QStringLiteral("You already have a computer."));
     else if (m_waiting)
-        m_requestHint->setText(QStringLiteral("You are in the queue. Leave the queue if you no longer need a computer."));
+        m_requestHint->setText(QStringLiteral("You are in the queue."));
     else
-        m_requestHint->setText(QStringLiteral("Tell the lab why you need a computer and for about how long."));
+        m_requestHint->setText(QStringLiteral("Choose a purpose and expected length."));
 
     // isHidden(): explicit hide() only, so this also works while the page is off-screen.
     const bool tableUsable = !m_available->isHidden() && m_available->rowCount() > 0;
@@ -335,8 +323,7 @@ void StudentPortalPage::onEndSession()
     }
     const OpResult r = m_services.sessions.endActiveSession(m_studentId);
     if (r.ok)
-        m_banner->showSuccess(QStringLiteral("Session ended. Your actual session length has been recorded. Thank "
-                                             "you for releasing the computer."));
+        m_banner->showSuccess(QStringLiteral("Session ended."));
     else
         m_banner->showError(QStringLiteral("Could not end the session: ") + r.message);
     emit dataChanged();

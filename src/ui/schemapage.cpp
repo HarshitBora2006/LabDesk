@@ -17,8 +17,7 @@ SchemaPage::SchemaPage(Services& services, QWidget* parent) : Page(parent), m_se
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("Schema and Relationships"),
-                                       QStringLiteral("Tables, columns, keys and constraints exactly as stored in the "
-                                                      "database."));
+                                       QStringLiteral("Tables, keys and relationships"));
     m_message = makeStateMessage();
     root->addWidget(m_message);
 
@@ -57,11 +56,6 @@ SchemaPage::SchemaPage(Services& services, QWidget* parent) : Page(parent), m_se
 
     QFrame* relCard = makeCard();
     cardLayout(relCard)->addWidget(makeLabel(QStringLiteral("All relationships"), QStringLiteral("sectionTitle")));
-    cardLayout(relCard)->addWidget(makeLabel(
-        QStringLiteral("Each row is a foreign key: the child column may only hold a value that exists in the parent "
-                       "key. With ON DELETE RESTRICT the parent row cannot be deleted while children refer to it; this "
-                       "is how referential integrity keeps session history attached to real students and computers."),
-        QStringLiteral("caption")));
     m_relationships = new QTableWidget();
     setupTable(m_relationships, {QStringLiteral("Child table.column"), QStringLiteral("Parent table.column"),
                                  QStringLiteral("On delete"), QStringLiteral("Cardinality")});

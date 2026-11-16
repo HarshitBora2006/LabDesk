@@ -7,8 +7,6 @@
 #include <QFrame>
 #include <QHeaderView>
 #include <QLabel>
-#include <QListWidget>
-#include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -36,7 +34,7 @@ DbOverviewPage::DbOverviewPage(Services& services, QWidget* parent) : Page(paren
 {
     QWidget* body = makeScrollPage(this);
     QVBoxLayout* root = makePageLayout(body, QStringLiteral("Database Overview"),
-                                       QStringLiteral("Live information about the database LabDesk is using."));
+                                       QStringLiteral("SQLite database in use"));
     auto* facts = new ResponsiveGrid(170, 12);
     QList<QWidget*> tiles;
     const QPair<QString, QString> names[] = {{QStringLiteral("engine"), QStringLiteral("Database engine")},
@@ -58,9 +56,6 @@ DbOverviewPage::DbOverviewPage(Services& services, QWidget* parent) : Page(paren
 
     QFrame* tablesCard = makeCard();
     cardLayout(tablesCard)->addWidget(makeLabel(QStringLiteral("Tables and record counts"), QStringLiteral("sectionTitle")));
-    cardLayout(tablesCard)->addWidget(makeLabel(QStringLiteral("Read from sqlite_master; each count is a live SELECT "
-                                                               "COUNT(*). The file location is not shown on purpose."),
-                                                QStringLiteral("caption")));
     m_tables = new QTableWidget();
     setupTable(m_tables, {QStringLiteral("Table"), QStringLiteral("Records"), QStringLiteral("What it stores")});
     alignNumericColumns(m_tables, {1});
@@ -70,22 +65,7 @@ DbOverviewPage::DbOverviewPage(Services& services, QWidget* parent) : Page(paren
     cardLayout(tablesCard)->addWidget(m_tablesState);
     root->addWidget(tablesCard);
 
-    QFrame* integrityCard = makeCard();
-    cardLayout(integrityCard)->addWidget(makeLabel(QStringLiteral("Integrity check"), QStringLiteral("sectionTitle")));
-    cardLayout(integrityCard)->addWidget(makeLabel(QStringLiteral("PRAGMA quick_check verifies the file structure; "
-                                                                  "pragma_foreign_key_check lists rows whose parent row "
-                                                                  "is missing. The dashboard additionally checks the "
-                                                                  "business rule OCCUPIED = has an active session."),
-                                                   QStringLiteral("caption")));
-    auto* run = makeButton(QStringLiteral("Run integrity check"), QStringLiteral("primary"));
-    cardLayout(integrityCard)->addWidget(run, 0, Qt::AlignLeft);
-    m_integrity = new QListWidget();
-    m_integrity->setObjectName(QStringLiteral("log"));
-    m_integrity->setMinimumHeight(110);
-    cardLayout(integrityCard)->addWidget(m_integrity);
-    root->addWidget(integrityCard);
     root->addStretch(1);
-    connect(run, &QPushButton::clicked, this, &DbOverviewPage::runIntegrityCheck);
 }
 
 void DbOverviewPage::refresh()
@@ -117,22 +97,6 @@ void DbOverviewPage::refresh()
         m_tables->show();
         m_tablesState->hide();
     }
-}
-
-void DbOverviewPage::runIntegrityCheck()
-{
-    QStringList findings;
-    QString error;
-    m_integrity->clear();
-    if (!m_services.dbms.integrityCheck(findings, &error)) {
-        m_integrity->addItem(QStringLiteral("The check could not run: ") + error);
-        return;
-    }
-    const QStringList problems = m_services.computers.consistencyProblems();
-    findings << (problems.isEmpty() ? QStringLiteral("Business rule check: every OCCUPIED computer has exactly one "
-                                                     "active session, every computer under maintenance has an open issue")
-                                    : QStringLiteral("Business rule problems: ") + problems.join(QStringLiteral("; ")));
-    m_integrity->addItems(findings);
 }
 
 }  // namespace labdesk::ui

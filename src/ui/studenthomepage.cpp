@@ -83,8 +83,7 @@ void StudentHomePage::refresh()
         m_visitAction->setText(QStringLiteral("End or view my session"));
     } else if (waiting) {
         m_visitTitle->setText(QStringLiteral("Waiting: number %1 of %2").arg(waiting->position).arg(queueLength));
-        m_visitDetails->setText(QStringLiteral("You requested a computer at %1. The next free computer is assigned "
-                                               "automatically.")
+        m_visitDetails->setText(QStringLiteral("Requested at %1. You will get the next free computer.")
                                     .arg(timeutil::toDisplay(waiting->requestedAt)));
         m_visitAction->setText(QStringLiteral("View queue position"));
     } else {
